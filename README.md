@@ -64,6 +64,9 @@ Prompts 01-06 are in place with:
 
 ## Common commands
 
+To run and test the platform yourself (local Compose stack and the AWS sandbox slice), follow
+[`docs/self-run-guide.md`](docs/self-run-guide.md).
+
 ```bash
 ./mvnw -q -DskipTests validate
 ./mvnw clean verify
