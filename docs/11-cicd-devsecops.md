@@ -57,8 +57,11 @@ is only an example and must be replaced with managed environment values before
 deployment.
 
 Dependabot is configured under `.github/dependabot.yml` for Maven, GitHub
-Actions, and Docker. `.github/PULL_REQUEST_TEMPLATE.md` reminds contributors
-to include verification and operational impact.
+Actions, service Dockerfiles, and Compose, with grouped PRs. Ignore rules keep
+updates inside the platform constraints: Spring Boot 3.5.x, Spring Cloud
+2025.0.x, Java 21 base images, springdoc 2.x, and the Jackson/Netty/Tomcat
+lines used by the root-POM CVE overrides. `.github/PULL_REQUEST_TEMPLATE.md`
+reminds contributors to include verification and operational impact.
 
 ## Local SonarQube (optional)
 

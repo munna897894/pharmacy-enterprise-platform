@@ -25,7 +25,7 @@ Reviewed image-SHA change in a separate deployment-config repository
 |---|---|
 | `.github/workflows/pr.yml` | Fork-safe read-only quality/security gates, conditional image builds/scans, artifacts, and superseded-PR cancellation. |
 | `.github/workflows/release.yml` | Repeats quality/security/image gates; scopes `packages: write` to the GHCR publish job and waits for the `ghcr-release` environment. |
-| `.github/dependabot.yml` | Weekly Maven, GitHub Actions, and Docker dependency update PRs. |
+| `.github/dependabot.yml` | Weekly grouped Maven, GitHub Actions, Dockerfile and Compose update PRs, with ignore rules for Boot 3.5 / Java 21 constraints. |
 | `CODEOWNERS` | Routes code review to the repository owner; protect `main` to require CODEOWNERS approval. |
 | `infra/compose/compose.yml` | Optional `sonar` profile; SonarQube does not join normal local startup. |
 | `infra/argocd/application-staging.example.yaml` | Example Argo CD application pointed at a separate deployment-config repository/path. |

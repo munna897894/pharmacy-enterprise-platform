@@ -5,73 +5,64 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      # Platform BOM: stay on Spring Boot 3.5.x / Spring Cloud 2025.0.x.
+      - dependency-name: "org.springframework.boot:*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: org.springframework.cloud:spring-cloud-dependencies
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # springdoc 3.x requires Spring Boot 4.
+      - dependency-name: "org.springdoc:*"
+        update-types: ["version-update:semver-major"]
+      # CVE overrides in the root pom must stay on the lines Spring Boot 3.5 supports.
+      - dependency-name: com.fasterxml.jackson:jackson-bom
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "io.netty:*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "org.apache.tomcat.embed:*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      maven-patch-minor:
+        update-types: [patch, minor]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns: ["*"]
   - package-ecosystem: docker
-    directory: /services/api-gateway
+    directories:
+      - /services/api-gateway
+      - /services/auth-service
+      - /services/product-service
+      - /services/customer-service
+      - /services/pharmacy-service
+      - /services/inventory-service
+      - /services/prescription-service
+      - /services/order-service
+      - /services/payment-service
+      - /services/notification-service
+      - /services/audit-service
+      - /services/external-mock-service
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/auth-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/product-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/customer-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/pharmacy-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/inventory-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/prescription-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/order-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/payment-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/notification-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/audit-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
-    directory: /services/external-mock-service
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-  - package-ecosystem: docker
+    open-pull-requests-limit: 5
+    ignore:
+      # Runtime is pinned to Java 21 (21-jre-jammy); only same-major refreshes are wanted.
+      - dependency-name: eclipse-temurin
+        update-types: ["version-update:semver-major"]
+      # Build-stage image tag embeds the JDK major; Maven itself is pinned by the wrapper.
+      - dependency-name: maven
+    groups:
+      service-base-images:
+        patterns: ["*"]
+  - package-ecosystem: docker-compose
     directory: /infra/compose
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+    groups:
+      compose-images:
+        patterns: ["*"]
