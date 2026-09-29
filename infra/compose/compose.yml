@@ -1,0 +1,398 @@
+services:
+  mysql:
+    image: mysql:8.4.3
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "3307:3306"
+
+  redis:
+    image: redis:7.4.1
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  kafka:
+    image: bitnamilegacy/kafka:4.0.0-debian-12-r10
+    environment:
+      KAFKA_ENABLE_KRAFT: "yes"
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_CLUSTER_ID: ${KAFKA_KRAFT_CLUSTER_ID:?required}
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka-data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+    ports:
+      - "9092:9092"
+
+  kafka-init:
+    image: bitnamilegacy/kafka:4.0.0-debian-12-r10
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    # Auto-topic-creation is disabled (production-realistic setting), so this
+    # one-shot job creates every topic from docs/07-event-contracts.md plus its
+    # .retry/.dlt companions before any service starts consuming/producing.
+    command:
+      - |
+        set -e
+        BOOTSTRAP=kafka:9092
+        DOMAIN_TOPICS='pharmacy.prescription.events.v1 pharmacy.order.events.v1 pharmacy.inventory.events.v1 pharmacy.payment.events.v1 pharmacy.notification.events.v1'
+        for t in $$DOMAIN_TOPICS; do
+          /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server $$BOOTSTRAP --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
+          /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server $$BOOTSTRAP --create --if-not-exists --topic $$t.retry --partitions 1 --replication-factor 1
+          /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server $$BOOTSTRAP --create --if-not-exists --topic $$t.dlt --partitions 1 --replication-factor 1
+        done
+        echo 'Kafka topics ready.'
+    restart: "no"
+
+  auth-service:
+    image: pharmacy/auth-service:local
+    build:
+      context: ../..
+      dockerfile: services/auth-service/Dockerfile
+      target: local
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${AUTH_DB_NAME:?required}
+      DB_USER: ${AUTH_DB_USER:?required}
+      DB_PASSWORD: ${AUTH_DB_PASSWORD:?required}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8081"
+
+  product-service:
+    image: pharmacy/product-service:local
+    build:
+      context: ../..
+      dockerfile: services/product-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${PRODUCT_DB_NAME:?required}
+      DB_USER: ${PRODUCT_DB_USER:?required}
+      DB_PASSWORD: ${PRODUCT_DB_PASSWORD:?required}
+      REDIS_HOST: redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+
+  customer-service:
+    image: pharmacy/customer-service:local
+    build:
+      context: ../..
+      dockerfile: services/customer-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${CUSTOMER_DB_NAME:?required}
+      DB_USER: ${CUSTOMER_DB_USER:?required}
+      DB_PASSWORD: ${CUSTOMER_DB_PASSWORD:?required}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+
+  pharmacy-service:
+    image: pharmacy/pharmacy-service:local
+    build:
+      context: ../..
+      dockerfile: services/pharmacy-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${PHARMACY_DB_NAME:?required}
+      DB_USER: ${PHARMACY_DB_USER:?required}
+      DB_PASSWORD: ${PHARMACY_DB_PASSWORD:?required}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+
+  inventory-service:
+    image: pharmacy/inventory-service:local
+    build:
+      context: ../..
+      dockerfile: services/inventory-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${INVENTORY_DB_NAME:?required}
+      DB_USER: ${INVENTORY_DB_USER:?required}
+      DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?required}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8085:8085"
+
+  prescription-service:
+    image: pharmacy/prescription-service:local
+    build:
+      context: ../..
+      dockerfile: services/prescription-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${PRESCRIPTION_DB_NAME:?required}
+      DB_USER: ${PRESCRIPTION_DB_USER:?required}
+      DB_PASSWORD: ${PRESCRIPTION_DB_PASSWORD:?required}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      customer-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      inventory-service:
+        condition: service_started
+    ports:
+      - "8086:8086"
+
+  order-service:
+    image: pharmacy/order-service:local
+    build:
+      context: ../..
+      dockerfile: services/order-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${ORDER_DB_NAME:?required}
+      DB_USER: ${ORDER_DB_USER:?required}
+      DB_PASSWORD: ${ORDER_DB_PASSWORD:?required}
+      INVENTORY_SERVICE_BASE_URL: http://inventory-service:8085
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      inventory-service:
+        condition: service_started
+    ports:
+      - "8087:8087"
+
+  external-mock-service:
+    image: pharmacy/external-mock-service:local
+    build:
+      context: ../..
+      dockerfile: services/external-mock-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+    ports:
+      - "8099:8080"
+
+  payment-service:
+    image: pharmacy/payment-service:local
+    build:
+      context: ../..
+      dockerfile: services/payment-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${PAYMENT_DB_NAME:?required}
+      DB_USER: ${PAYMENT_DB_USER:?required}
+      DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?required}
+      ORDER_SERVICE_BASE_URL: http://order-service:8087
+      CUSTOMER_SERVICE_BASE_URL: http://customer-service:8083
+      PAYMENT_GATEWAY_BASE_URL: http://external-mock-service:8080
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      order-service:
+        condition: service_started
+      customer-service:
+        condition: service_started
+      external-mock-service:
+        condition: service_started
+    ports:
+      - "8088:8088"
+
+  notification-service:
+    image: pharmacy/notification-service:local
+    build:
+      context: ../..
+      dockerfile: services/notification-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8090:8089"
+
+  audit-service:
+    image: pharmacy/audit-service:local
+    build:
+      context: ../..
+      dockerfile: services/audit-service/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${AUDIT_DB_NAME:?required}
+      DB_USER: ${AUDIT_DB_USER:?required}
+      DB_PASSWORD: ${AUDIT_DB_PASSWORD:?required}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8091:8090"
+
+  api-gateway:
+    image: pharmacy/api-gateway:local
+    build:
+      context: ../..
+      dockerfile: services/api-gateway/Dockerfile
+    env_file: ../../.env
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      REDIS_HOST: redis
+      AUTH_SERVICE_BASE_URL: http://auth-service:8081
+      INVENTORY_SERVICE_BASE_URL: http://inventory-service:8085
+      ORDER_SERVICE_BASE_URL: http://order-service:8087
+      PAYMENT_SERVICE_BASE_URL: http://payment-service:8088
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      inventory-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      customer-service:
+        condition: service_started
+      pharmacy-service:
+        condition: service_started
+      prescription-service:
+        condition: service_started
+    ports:
+      - "8080:8080"
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports:
+      - "3000:3000"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
+  sonarqube:
+    image: sonarqube:10.7-community
+    profiles: ["sonar"]
+    ports:
+      - "9000:9000"
+    volumes:
+      - sonar-data:/opt/sonarqube/data
+      - sonar-extensions:/opt/sonarqube/extensions
+      - sonar-logs:/opt/sonarqube/logs
+
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:
+  sonar-data:
+  sonar-extensions:
+  sonar-logs:

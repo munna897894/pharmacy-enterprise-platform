@@ -1,0 +1,22 @@
+apiVersion: v2
+name: pharmacy-observability
+description: Optional open-source observability stack for local pharmacy workloads on AWS/EKS
+type: application
+version: 0.1.0
+appVersion: "1.0"
+dependencies:
+  - name: kube-prometheus-stack
+    version: 68.4.4
+    repository: https://prometheus-community.github.io/helm-charts
+  - name: loki
+    version: 6.24.0
+    repository: https://grafana.github.io/helm-charts
+  - name: tempo
+    version: 1.12.0
+    repository: https://grafana.github.io/helm-charts
+  - name: opentelemetry-collector
+    version: 0.113.0
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+  - name: alloy
+    version: 0.12.0
+    repository: https://grafana.github.io/helm-charts

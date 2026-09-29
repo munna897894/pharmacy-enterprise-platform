@@ -1,0 +1,79 @@
+spring:
+  application:
+    name: auth-service
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        type:
+          preferred_uuid_jdbc_type: CHAR
+  datasource:
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3307}/${DB_NAME:auth_service}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: ${DB_USER:auth_user}
+    password: ${DB_PASSWORD:auth_password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    default-schema: ${DB_NAME:auth_service}
+
+server:
+  port: 8081
+  servlet:
+    context-path: /
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+    prometheus:
+      enabled: true
+  health:
+    probes:
+      enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}
+
+jwt:
+  private-key-path: ${JWT_PRIVATE_KEY_PATH:/etc/auth/private_key.pem}
+  public-key-path: ${JWT_PUBLIC_KEY_PATH:/etc/auth/public_key.pem}
+  issuer: ${JWT_ISSUER:http://auth-service:8081}
+  audience: ${JWT_AUDIENCE:pharmacy-api}
+
+logging:
+  level:
+    root: INFO
+    com.jagapathi.pharmacy: DEBUG
+  pattern:
+    console: "%d{ISO8601} %5p [%t] %c [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] - %m%n"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: "!local"
+logging:
+  structured:
+    format:
+      console: logstash
+    json:
+      add:
+        service: ${spring.application.name}
+        environment: ${ENVIRONMENT:prod}

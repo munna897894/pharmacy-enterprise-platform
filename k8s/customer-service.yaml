@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-service
+  namespace: pharmacy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: customer-service
+  template:
+    metadata:
+      labels:
+        app: customer-service
+    spec:
+      containers:
+        - name: customer-service
+          image: docker.io/munna897/pharmacy-customer-service:local-20260917-1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: pharmacy-common
+            - secretRef:
+                name: pharmacy-secrets
+          env:
+            - name: DB_HOST
+              value: host.docker.internal
+            - name: DB_NAME
+              value: pharmacy_customer
+            - name: DB_USER
+              value: customer_user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pharmacy-secrets
+                  key: CUSTOMER_DB_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
+            initialDelaySeconds: 30
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-service
+  namespace: pharmacy
+spec:
+  selector:
+    app: customer-service
+  ports:
+    - port: 8082
+      targetPort: 8082
+  type: ClusterIP

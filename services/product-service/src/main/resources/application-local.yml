@@ -1,0 +1,17 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  datasource:
+  url: jdbc:mysql://${DB_HOST:host.docker.internal}:${DB_PORT:3307}/${DB_NAME:pharmacy_product}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+  username: ${DB_USER:product_user}
+  password: ${DB_PASSWORD:product_password}
+
+redis:
+  host: ${REDIS_HOST:redis}
+  port: ${REDIS_PORT:6379}
+
+logging:
+  level:
+    root: INFO

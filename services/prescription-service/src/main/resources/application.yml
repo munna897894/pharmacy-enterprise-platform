@@ -1,0 +1,87 @@
+spring:
+  application:
+    name: prescription-service
+  datasource:
+    url: jdbc:mysql://${DB_HOST:host.docker.internal}:${DB_PORT:3307}/${DB_NAME:prescription_service}
+    username: ${DB_USER:prescription_user}
+    password: ${DB_PASSWORD:prescription_password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+        type:
+          preferred_uuid_jdbc_type: CHAR
+  flyway:
+    baseline-on-migrate: true
+    baseline-description: Initial schema
+    out-of-order: false
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      adjust-dates-to-context-timezone: false
+
+server:
+  port: 8086
+  servlet:
+    context-path: /
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,readiness,liveness
+  endpoint:
+    health:
+      show-details: always
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+    probes:
+      enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}
+
+logging:
+  level:
+    root: INFO
+    com.jagapathi.pharmacy: DEBUG
+    org.springframework.security: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] - %msg%n"
+
+services:
+  customer-service:
+    base-url: http://customer-service:8082
+  inventory-service:
+    base-url: http://inventory-service:8085
+  product-service:
+    base-url: http://product-service:8082
+
+---
+spring:
+  config:
+    activate:
+      on-profile: "!local"
+logging:
+  structured:
+    format:
+      console: logstash
+    json:
+      add:
+        service: ${spring.application.name}
+        environment: ${ENVIRONMENT:prod}

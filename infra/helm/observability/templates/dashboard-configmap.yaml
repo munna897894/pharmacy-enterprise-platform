@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pharmacy-observability-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+data:
+  pharmacy-overview.json: |-
+    {
+      "title": "Pharmacy Platform Observability",
+      "uid": "pharmacy-overview",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Request rate by service",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [{ "expr": "sum by (service) (rate(http_server_requests_seconds_count[5m]))", "legendFormat": "{{ "{{service}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "HTTP 5xx ratio",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [{ "expr": "sum by (service) (rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / clamp_min(sum by (service) (rate(http_server_requests_seconds_count[5m])), 0.001)", "legendFormat": "{{ "{{service}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "HTTP p95 latency",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, service) (rate(http_server_requests_seconds_bucket[5m])))", "legendFormat": "{{ "{{service}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "JVM heap utilization",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [{ "expr": "max by (service) (jvm_memory_used_bytes{area=\"heap\"} / jvm_memory_max_bytes{area=\"heap\"})", "legendFormat": "{{ "{{service}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Hikari pending connections",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+          "targets": [{ "expr": "max by (service) (hikaricp_connections_pending)", "legendFormat": "{{ "{{service}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Kafka consumer lag",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+          "targets": [{ "expr": "max by (consumergroup, topic) (kafka_consumergroup_lag)", "legendFormat": "{{ "{{consumergroup}}" }} / {{ "{{topic}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Business outcomes",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+          "targets": [{ "expr": "sum by (service, operation, outcome) (rate(pharmacy_business_events_total[5m]))", "legendFormat": "{{ "{{service}}" }} / {{ "{{operation}}" }} / {{ "{{outcome}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 8,
+          "type": "logs",
+          "title": "Structured logs (search correlationId / traceId)",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+          "targets": [{ "expr": "{namespace=\"pharmacy\"} | json", "queryType": "range", "refId": "A" }]
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Oldest unpublished outbox event",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+          "targets": [{ "expr": "max by (service) (pharmacy_outbox_oldest_unpublished_seconds)", "legendFormat": "{{ "{{service}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Recent dead-letter topic records",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+          "targets": [{ "expr": "sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~\".*\\\\.dlt\"}[5m]))", "legendFormat": "{{ "{{topic}}" }}", "refId": "A" }]
+        }
+      ]
+    }

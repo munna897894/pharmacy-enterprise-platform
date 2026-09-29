@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  namespace: pharmacy
+  labels:
+    app: product-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+    spec:
+      serviceAccountName: product-service
+      initContainers:
+        - name: fetch-secrets
+          image: amazon/aws-cli:2.17.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              aws secretsmanager get-secret-value --region __AWS_REGION__ \
+                --secret-id __PRODUCT_DB_SECRET_ARN__ --query SecretString --output text \
+                | tee /secrets/db.json
+              python -c "import json; d=json.load(open('/secrets/db.json')); open('/secrets/db_password','w').write(d['password'])"
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+      containers:
+        - name: product-service
+          image: __PRODUCT_SERVICE_IMAGE__
+          command: ["/bin/sh", "-c"]
+          args:
+            - export DB_PASSWORD="$(cat /secrets/db_password)"; exec java -jar /app/app.jar
+          ports:
+            - containerPort: 8082
+          env:
+            - name: DB_HOST
+              value: "__RDS_ENDPOINT__"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_NAME
+              value: "pharmacy_product"
+            - name: DB_USER
+              value: "product_user"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: JWT_ISSUER
+              value: "http://auth-service:8081"
+            - name: JWT_AUDIENCE
+              value: "pharmacy-api"
+            - name: ENVIRONMENT
+              value: "aws"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://pharmacy-observability-opentelemetry-collector:4318/v1/traces"
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: secrets
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  namespace: pharmacy
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /actuator/prometheus
+    prometheus.io/port: "8082"
+spec:
+  selector:
+    app: product-service
+  ports:
+    - port: 8082
+      targetPort: 8082

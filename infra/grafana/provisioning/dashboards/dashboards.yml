@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Pharmacy
+    orgId: 1
+    folder: Pharmacy Platform
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

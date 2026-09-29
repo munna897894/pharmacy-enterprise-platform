@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-service
+  namespace: pharmacy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audit-service
+  template:
+    metadata:
+      labels:
+        app: audit-service
+    spec:
+      containers:
+        - name: audit-service
+          image: docker.io/munna897/pharmacy-audit-service:local-20260917-2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8086
+          envFrom:
+            - configMapRef:
+                name: pharmacy-common
+            - secretRef:
+                name: pharmacy-secrets
+          env:
+            - name: DB_HOST
+              value: host.docker.internal
+            - name: DB_NAME
+              value: pharmacy_audit
+            - name: DB_USER
+              value: audit_user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pharmacy-secrets
+                  key: AUDIT_DB_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8086
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8086
+            initialDelaySeconds: 30
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-service
+  namespace: pharmacy
+spec:
+  selector:
+    app: audit-service
+  ports:
+    - port: 8086
+      targetPort: 8086
+  type: ClusterIP

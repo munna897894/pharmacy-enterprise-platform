@@ -1,0 +1,77 @@
+groups:
+  - name: pharmacy-alerts
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.job }}"
+          description: "The target {{ $labels.instance }} has been unavailable for at least two minutes."
+      - alert: HighHttp5xxRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP 5xx ratio exceeds 5%"
+      - alert: HighHttpP95Latency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, service, uri) (rate(http_server_requests_seconds_bucket[5m]))
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP p95 latency exceeds one second"
+      - alert: HikariConnectionsPending
+        expr: max by (service) (hikaricp_connections_pending) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hikari pool has pending connection requests"
+      - alert: KafkaConsumerLagHigh
+        expr: max by (consumergroup, topic) (kafka_consumergroup_lag) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag exceeds 100 records"
+      - alert: DeadLetterTopicNotEmpty
+        expr: sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".*\\.dlt"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A dead-letter topic contains records"
+      - alert: OutboxOldestEventTooOld
+        expr: max by (service) (pharmacy_outbox_oldest_unpublished_seconds) > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest unpublished outbox event is older than five minutes"
+      - alert: JvmHeapUsageHigh
+        expr: |
+          max by (service) (
+            jvm_memory_used_bytes{area="heap"}
+            / jvm_memory_max_bytes{area="heap"}
+          ) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM heap usage exceeds 85%"
+      - alert: KubernetesContainerRestarting
+        expr: increase(kube_pod_container_status_restarts_total[15m]) > 2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kubernetes container restarted more than twice in 15 minutes"

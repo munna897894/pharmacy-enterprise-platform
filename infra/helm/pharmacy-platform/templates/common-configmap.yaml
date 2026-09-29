@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pharmacy-common
+  namespace: {{ .Values.namespace | default "pharmacy" }}
+data:
+{{- range $key, $value := .Values.commonConfig }}
+  {{ $key }}: {{ $value | quote }}
+{{- end }}

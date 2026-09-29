@@ -1,0 +1,29 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+  datasource:
+    url: jdbc:h2:mem:customer_test
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+    show-sql: false
+  flyway:
+    enabled: false
+
+server:
+  port: 0
+
+logging:
+  level:
+    root: WARN
+    com.jagapathi.pharmacy: DEBUG
+
+security:
+  jwt:
+    issuer: http://localhost:8080
+    audience: pharmacy-api

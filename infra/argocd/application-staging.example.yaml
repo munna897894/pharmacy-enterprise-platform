@@ -1,0 +1,15 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pharmacy-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/REPLACE_WITH_ORG/pharmacy-deployment-config.git
+    targetRevision: main
+    path: environments/staging/pharmacy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pharmacy-staging
+  syncPolicy: {}

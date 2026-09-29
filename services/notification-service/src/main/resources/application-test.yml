@@ -1,0 +1,64 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:notification_test;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    properties:
+      hibernate:
+        type:
+          preferred_uuid_jdbc_type: BINARY
+  h2:
+    console:
+      enabled: true
+  mail:
+    host: localhost
+    port: 3025
+  cloud:
+    stream:
+      kafka:
+        binder:
+          brokers: localhost:9092
+      bindings:
+        orderCreatedConsumer-in-0:
+          destination: pharmacy.order.events.v1
+          group: notification-order-events-v1
+          consumer:
+            start-offset: earliest
+        orderShippedConsumer-in-0:
+          destination: pharmacy.order.events.v1
+          group: notification-order-events-v1
+        paymentProcessedConsumer-in-0:
+          destination: pharmacy.payment.events.v1
+          group: notification-payment-events-v1
+          consumer:
+            start-offset: earliest
+        prescriptionFilledConsumer-in-0:
+          destination: pharmacy.prescription.events.v1
+          group: notification-prescription-events-v1
+          consumer:
+            start-offset: earliest
+        prescriptionExpiringConsumer-in-0:
+          destination: pharmacy.prescription.events.v1
+          group: notification-prescription-events-v1
+        lowStockConsumer-in-0:
+          destination: pharmacy.inventory.events.v1
+          group: notification-inventory-events-v1
+          consumer:
+            start-offset: earliest
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9090
+          jwk-set-uri: http://localhost:9090/.well-known/jwks.json
+
+server:
+  port: 0
+
+logging:
+  level:
+    root: WARN
+    com.jagapathi.pharmacy: INFO

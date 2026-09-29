@@ -1,0 +1,134 @@
+spring:
+  application:
+    name: notification-service
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          batch_size: 20
+        type:
+          preferred_uuid_jdbc_type: BINARY
+  datasource:
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3307}/${DB_NAME:pharmacy_notification}
+    username: ${DB_USER:pharmacy_notification}
+    password: ${DB_PASSWORD:pharmacy_notification}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+  cloud:
+    stream:
+      kafka:
+        binder:
+          brokers: ${KAFKA_BOOTSTRAP_SERVERS:host.docker.internal:9092}
+          auto-add-partitions: false
+          enable-observation: true
+      bindings:
+        orderCreatedConsumer-in-0:
+          destination: pharmacy.order.events.v1
+          group: notification-order-events-v1
+          consumer:
+            start-offset: earliest
+        orderShippedConsumer-in-0:
+          destination: pharmacy.order.events.v1
+          group: notification-order-events-v1
+        paymentProcessedConsumer-in-0:
+          destination: pharmacy.payment.events.v1
+          group: notification-payment-events-v1
+          consumer:
+            start-offset: earliest
+        prescriptionFilledConsumer-in-0:
+          destination: pharmacy.prescription.events.v1
+          group: notification-prescription-events-v1
+          consumer:
+            start-offset: earliest
+        prescriptionExpiringConsumer-in-0:
+          destination: pharmacy.prescription.events.v1
+          group: notification-prescription-events-v1
+        lowStockConsumer-in-0:
+          destination: pharmacy.inventory.events.v1
+          group: notification-inventory-events-v1
+          consumer:
+            start-offset: earliest
+  mail:
+    host: localhost
+    port: 1025
+    username: 
+    password: 
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://auth-service:8081
+          jwk-set-uri: http://auth-service:8081/api/v1/auth/.well-known/jwks.json
+  
+server:
+  port: 8089
+  servlet:
+    context-path: /
+    
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      service: notification-service
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}
+  health:
+    # No SMTP server is provisioned in local/dev compose (EmailSender best-effort
+    # logs/no-ops when delivery fails); the mail auto-configured health indicator
+    # otherwise always reports DOWN (connection refused to the placeholder
+    # localhost:1025 host) and drags down the whole liveness/readiness aggregate.
+    mail:
+      enabled: false
+    probes:
+      enabled: true
+
+external-service:
+  url: http://external-mock-service:8080
+
+logging:
+  level:
+    root: INFO
+    com.jagapathi.pharmacy: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} [%thread] %-5level %logger{36} [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] - %msg%n"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: "!local"
+logging:
+  structured:
+    format:
+      console: logstash
+    json:
+      add:
+        service: ${spring.application.name}
+        environment: ${ENVIRONMENT:prod}

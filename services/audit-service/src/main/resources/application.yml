@@ -1,0 +1,152 @@
+spring:
+  application:
+    name: audit-service
+  profiles:
+    active: ${SPRING_PROFILE:prod}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: false
+        type:
+          preferred_uuid_jdbc_type: CHAR
+  datasource:
+    url: jdbc:mysql://${DB_HOST:host.docker.internal}:${DB_PORT:3307}/${DB_NAME:pharmacy_audit}
+    username: ${DB_USER:audit_user}
+    password: ${DB_PASSWORD:audit_password}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 20000
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:host.docker.internal:9092}
+    consumer:
+      group-id: audit-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        max.poll.records: 100
+  cloud:
+    function:
+      definition: "inventoryEventConsumer;orderEventConsumer;paymentEventConsumer;prescriptionEventConsumer;notificationEventConsumer"
+    stream:
+      kafka:
+        binder:
+          brokers: ${KAFKA_BOOTSTRAP_SERVERS:host.docker.internal:9092}
+          enable-observation: true
+        bindings:
+          orderEventConsumer-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: pharmacy.order.events.v1.dlt
+          inventoryEventConsumer-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: pharmacy.inventory.events.v1.dlt
+          paymentEventConsumer-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: pharmacy.payment.events.v1.dlt
+          prescriptionEventConsumer-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: pharmacy.prescription.events.v1.dlt
+          notificationEventConsumer-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: pharmacy.notification.events.v1.dlt
+      bindings:
+        orderEventConsumer-in-0:
+          destination: pharmacy.order.events.v1
+          group: audit-order-events-v1
+          consumer:
+            max-attempts: 3
+        paymentEventConsumer-in-0:
+          destination: pharmacy.payment.events.v1
+          group: audit-payment-events-v1
+          consumer:
+            max-attempts: 3
+        notificationEventConsumer-in-0:
+          destination: pharmacy.notification.events.v1
+          group: audit-notification-events-v1
+          consumer:
+            max-attempts: 3
+        prescriptionEventConsumer-in-0:
+          destination: pharmacy.prescription.events.v1
+          group: audit-prescription-events-v1
+          consumer:
+            max-attempts: 3
+        inventoryEventConsumer-in-0:
+          destination: pharmacy.inventory.events.v1
+          group: audit-inventory-events-v1
+          consumer:
+            max-attempts: 3
+  cache:
+    type: simple
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI:http://auth-service:8081}
+          jwk-set-uri: ${JWT_JWK_SET_URI:http://auth-service:8081/api/v1/auth/.well-known/jwks.json}
+
+server:
+  port: 8090
+  servlet:
+    context-path: /
+  compression:
+    enabled: true
+    min-response-size: 1024
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+    metrics:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operations-sorter: method
+
+logging:
+  pattern:
+    correlation: "[%X{correlationId:-},%X{traceId:-},%X{spanId:-}]"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: "!local"
+logging:
+  structured:
+    format:
+      console: logstash
+    json:
+      add:
+        service: ${spring.application.name}
+        environment: ${ENVIRONMENT:prod}

@@ -1,0 +1,44 @@
+# Self-hosted Redis for product-service's cache (chosen over ElastiCache for
+# this pass — see docs/aws-plan-review.md section 2). No persistence: purely
+# a cache, acceptable to lose on pod restart for this temporary exercise.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: pharmacy
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: pharmacy
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379

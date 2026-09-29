@@ -1,0 +1,13 @@
+package com.jagapathi.pharmacy.observability;
+
+public enum BusinessMetric {
+    ORDER_CREATED,
+    INVENTORY_RESERVATION,
+    PAYMENT,
+    PRESCRIPTION_VERIFICATION,
+    NOTIFICATION_DELIVERY,
+    MEDICATION_CATALOG,
+    CACHE_OPERATION,
+    OUTBOX_PUBLISH,
+    DEAD_LETTER
+}

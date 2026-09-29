@@ -1,0 +1,10 @@
+asyncapi: 3.0.0
+info:
+  title: Pharmacy Events
+  version: 1.0.0
+channels:
+  pharmacy.order.events.v1:
+    messages:
+      orderCreated:
+        payload:
+          $ref: ../json-schema/order-created.schema.json

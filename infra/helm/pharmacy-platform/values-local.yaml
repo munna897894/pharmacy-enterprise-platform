@@ -1,0 +1,23 @@
+namespace: pharmacy
+commonConfig:
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP_SERVERS: host.docker.internal:9092
+  AUTH_SERVICE_HOST: auth-service
+  AUTH_SERVICE_PORT: "8081"
+  DB_HOST: host.docker.internal
+  DB_PORT: "3306"
+  AUTH_DB_NAME: auth_service
+  AUTH_DB_USER: auth_user
+  PRODUCT_DB_NAME: pharmacy_product
+  PRODUCT_DB_USER: product_user
+services:
+  api-gateway:
+    image: pharmacy/api-gateway:local
+    port: 8080
+  auth-service:
+    image: pharmacy/auth-service:local
+    port: 8081
+  product-service:
+    image: pharmacy/product-service:local
+    port: 8081

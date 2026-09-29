@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: pharmacy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+    spec:
+      containers:
+        - name: payment-service
+          image: docker.io/munna897/pharmacy-payment-service:local-20260917-2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8088
+          envFrom:
+            - configMapRef:
+                name: pharmacy-common
+            - secretRef:
+                name: pharmacy-secrets
+          env:
+            - name: DB_HOST
+              value: host.docker.internal
+            - name: DB_NAME
+              value: pharmacy_payment
+            - name: DB_USER
+              value: payment_user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pharmacy-secrets
+                  key: PAYMENT_DB_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8088
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8088
+            initialDelaySeconds: 30
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: pharmacy
+spec:
+  selector:
+    app: payment-service
+  ports:
+    - port: 8088
+      targetPort: 8088
+  type: ClusterIP

@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          metrics:
+            enabled: false
+      default-filters:
+        - name: RewritePath
+          args:
+            regexp: "^/api/v1/(?<segment>.*)"
+            replacement: "/api/v1/${segment}"
+      httpserver:
+        connect-timeout: 5000
+        response-timeout: 10000
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8081
+          jwk-set-uri: http://localhost:8081/api/v1/auth/.well-known/jwks.json
+
+auth-service:
+  jwks-uri: http://localhost:8081/api/v1/auth/.well-known/jwks.json
+
+rate-limit:
+  per-user-per-minute: 100
+  per-ip-per-minute: 1000
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    root: WARN
+    com.jagapathi.pharmacy.gateway: DEBUG
+

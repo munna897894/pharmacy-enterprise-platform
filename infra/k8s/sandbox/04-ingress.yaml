@@ -1,0 +1,27 @@
+# Internet-facing ALB, target-type ip (required for Fargate-style pod IP
+# targeting and works fine for managed-node-group EC2 too), fronting ONLY
+# api-gateway — matches the platform-wide rule that all public traffic enters
+# through api-gateway; auth-service and product-service are never directly
+# internet-reachable, only reachable via the gateway inside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pharmacy-ingress
+  namespace: pharmacy
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8080
