@@ -52,6 +52,36 @@ datasources and are not published on host ports.
    panels to identify the affected service, then inspect its logs and trace
    spans for the cause.
 
+Outbox relays restore the stored context around each Kafka send
+(`TraceContextHeaders.runInCapturedContext`), and scheduled-task observations
+are disabled in the relaying services, so one order produces one Tempo trace
+spanning the gateway, order, inventory, payment, external-mock, notification
+and audit services. Loki streams carry `service_name` and `container` labels,
+so `{service_name="order-service"} |= "<id>"` narrows a search to one service.
+
+## Actuator exposure
+
+Services expose `/actuator/health`, `/health/liveness`, `/health/readiness`,
+`/info` and `/prometheus` without authentication and deny every other
+`/actuator/**` path. The API gateway serves only a detail-free
+`/actuator/health` on its public port 8080; its full actuator, including
+Prometheus, runs on internal management port 9081, which Prometheus, probes
+and Kubernetes scrape annotations target.
+
+## Drills
+
+`scripts/resilience-lab.sh` reuses a Newman-exported environment (it runs the
+Postman suite first if needed):
+
+- `./scripts/resilience-lab.sh slow-payment 1500` delays the mock payment
+  gateway, places an order, looks up its trace ID in Loki by correlation ID and
+  prints the slowest Tempo spans. Expect `external-mock` `process-payment` at
+  roughly the configured delay.
+- `./scripts/resilience-lab.sh hikari 45 120` sustains concurrent reads on
+  order-service (bypassing gateway rate limiting) and prints Hikari pending,
+  active and acquire-time maxima. A local run reached 85 pending requests with
+  a 10-connection pool.
+
 Correlation IDs are for log search; trace IDs identify a distributed trace.
 They serve different purposes and should be retained together. Metric labels
 remain low-cardinality and never contain order, customer, prescription, or

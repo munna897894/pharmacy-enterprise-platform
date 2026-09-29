@@ -122,6 +122,8 @@ Authorization is driven by `InventoryReserved` events.
 | GET | `/api/v1/notifications?customerId={customerId}` | Owner/staff | Page simulated delivery records for one customer; `customerId` filter required, ownership verified via customer-service |
 | GET | `/api/v1/notifications/{id}` | Owner/staff | Delivery details |
 
+Notification responses include `orderId` (nullable) after `customerId` for notifications produced from order/payment events; this is an additive field. Notifications are created from `PaymentCompleted`, `PaymentFailed`, `PaymentRefunded`, `PrescriptionVerified` and `PrescriptionRejected` events, with the order-to-customer mapping taken from `OrderCreated`. Email delivery is simulated locally (`NOTIFICATION_EMAIL_MODE=simulated`); set it to `smtp` to use a real mail server.
+
 ## Audit service
 
 | Method | Route | Access | Purpose |

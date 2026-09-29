@@ -116,6 +116,16 @@ cases, and the order/payment/inventory choreography-saga scenarios.
   asking customer-service whether the caller owns that customer profile (staff
   roles bypass the lookup). The happy-path Newman step now polls, with a bounded
   wait, for a `SENT` notification instead of logging a best-effort warning.
+- **Event-driven notifications**: notification-service now consumes order,
+  payment and prescription topics with per-topic consumer groups, keeps an
+  order-to-customer projection from `OrderCreated`, retries payment events
+  until that projection exists, and dead-letters to `<topic>.dlt`. Email is
+  simulated by default (`NOTIFICATION_EMAIL_MODE=simulated`).
+- **Audit Kafka headers**: correlation headers arrive as `byte[]`; audit now
+  decodes them via `CorrelationIdContext.fromHeader`, and DLQ bindings use
+  `dlqPartitions: 1` to match the single-partition DLTs.
+- **Saga polling**: bounded polls were raised to 30 attempts because three
+  outbox hops at a 5 s interval take 11-15 s.
 - **`StockLevelTest.testCreateStockLevel`**: now expects a `null` version for a
   new entity, matching the documented Spring Data `isNew()` behavior.
 

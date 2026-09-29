@@ -2,60 +2,41 @@
 
 ## Summary
 
-This area is **PARTIALLY IMPLEMENTED** in the real repo. The codebase has Actuator endpoints, Prometheus registry dependencies, some correlation-ID logging, a Compose overlay with Prometheus/Grafana/OpenTelemetry Collector, and Kubernetes scrape annotations — but it does **not** yet have a complete end-to-end tracing/logging/alerting implementation that matches Prompt 10's full ambition.
+This area is **IMPLEMENTED and runtime-verified** against the local Compose stack. Every service exports Micrometer metrics to Prometheus, W3C trace context flows over HTTP and Kafka (including the transactional-outbox hops) into Tempo, container logs are shipped by Alloy to Loki with per-service labels, and Grafana provisions datasources plus the **Pharmacy Platform Observability** dashboard. Alert rules cover availability, 5xx rate, p95 latency, Hikari pressure, Kafka lag, DLT activity, outbox age, JVM heap and (on Kubernetes) restarts.
 
-The most interview-worthy takeaway is the gap between **having observability libraries on the classpath** and **having a production-grade observability system**. This repo demonstrates the first part fairly well; the second part is still incomplete, especially around structured JSON logs, full trace propagation, business metrics, and meaningful dashboards/alerts.
+The most interview-worthy takeaways are the non-obvious fixes found only by running the stack: Kafka headers arriving as `byte[]`, the outbox relay breaking traces because the producer span was parented to the scheduler, and actuator endpoints silently returning 401 to Prometheus.
 
-## Diagram — current repo observability flow
+## Diagram — observability flow
 
 ```text
-                    CURRENT REPO STATE (real, partial)
-
-Client
-  │
-  │ HTTP + optional X-Correlation-ID
-  ▼
-api-gateway
-  │  - CorrelationIdFilter creates/preserves X-Correlation-ID
-  │  - LoggingFilter writes MDC-backed log lines
-  │  - Actuator exposes /actuator/health,/metrics,/prometheus
-  │  - OTLP endpoint property points at otel-collector
-  ▼
-downstream services
-  │  - most services expose health/info/prometheus
-  │  - some also expose metrics/readiness/liveness
-  │  - Micrometer + Prometheus deps present in many modules
-  │
-  ├──────────────► Prometheus scrapes a subset of services
-  │                (infra/compose/prometheus.yml)
-  │
-  ├──────────────► Grafana exists
-  │                but dashboard/provisioning is minimal
-  │
-  ├──────────────► Prometheus alert rules exist
-  │                but only one basic ServiceDown alert
-  │
-  └──────────────► OTel Collector receives OTLP
-                   but currently exports to logging only
-                   (no Jaeger/Tempo backend configured)
+Client ──HTTP (+X-Correlation-ID)──► api-gateway :8080 (public)   actuator :9081 (internal)
+                                        │ CorrelationIdFilter, W3C traceparent
+                                        ▼
+                               order-service ──outbox──► Kafka ──► inventory ──outbox──► Kafka ──► payment ──HTTP──► external-mock
+                                    │   stored traceparent/baggage + X-Correlation-ID restored per record         │
+                                    │   (TraceContextHeaders.runInCapturedContext)                                   ▼
+                                    │                                                         Kafka ──► notification, audit
+                                    ▼
+ metrics:  /actuator/prometheus (allow-listed)  ──► Prometheus ──► Grafana dashboard + alerts.yml
+ traces:   OTLP http ──► OpenTelemetry Collector ──► Tempo ──► Grafana (one trace, 7 services)
+ logs:     container stdout ──► Alloy (service_name/container labels) ──► Loki ──► Grafana
 ```
 
 ## Key files
 
 | File | What it shows |
 |---|---|
-| `services/api-gateway/src/main/resources/application.yml` | The strongest real observability config in the repo: Actuator exposure, liveness/readiness probes, histogram for `http.server.requests`, common metric tags (`application`, `environment`), and an OTLP endpoint property pointing at `otel-collector:4317`. |
-| `services/api-gateway/src/main/java/com/jagapathi/pharmacy/gateway/filter/CorrelationIdFilter.java` | Real correlation-ID handling at the platform edge: preserves incoming `X-Correlation-ID` or creates a UUID, forwards it downstream, and echoes it in responses. |
-| `services/api-gateway/src/main/java/com/jagapathi/pharmacy/gateway/filter/LoggingFilter.java` | MDC-backed request logging with method, path, status code and duration. Useful for discussing correlation vs request logging, even though it is not structured JSON. |
-| `services/api-gateway/src/test/java/com/jagapathi/pharmacy/gateway/filter/CorrelationIdFilterTest.java` | Verifies the gateway really generates and preserves `X-Correlation-ID`; this is one of the few concrete observability-focused tests in the repo. |
-| `services/auth-service/src/main/resources/application.yml` | Shows another service exposing `health,info,prometheus,readiness,liveness`; useful because it reveals observability config is present but inconsistent across modules. |
-| `services/auth-service/src/main/java/com/jagapathi/pharmacy/auth/api/exception/GlobalExceptionHandler.java` | A useful “negative example”: error responses include a `correlationId`, but it is generated fresh with `UUID.randomUUID()` rather than reusing request context. |
-| `services/product-service/src/main/resources/application.yml` | Shows a lighter setup: `health,info,prometheus` enabled, but no explicit `metrics` exposure, no tracing section, and no structured logging config. |
-| `infra/compose/compose.yml` | Real local observability stack skeleton: Prometheus, Grafana and OpenTelemetry Collector containers are defined with pinned images. |
-| `infra/compose/prometheus.yml` | Scrape targets for a subset of services. Great example of “real config exists, but scope is incomplete” because only five services are scraped. |
-| `infra/compose/otel-collector.yaml` | The collector currently receives OTLP traces/metrics and exports them to `logging`; that is useful for learning, but it is not a real trace-backend setup like Tempo or Jaeger. |
-| `infra/prometheus/alerts.yml` | Real alerting file, but it currently defines only `ServiceDown`. This makes it a good study artifact for the difference between “some alerting exists” and “SRE-grade alert coverage exists.” |
-| `infra/grafana/dashboards/overview.json` + `infra/kubernetes/base/api-gateway.yaml` | The dashboard file exists but has zero panels; the Kubernetes manifest shows real readiness/liveness probes and Prometheus scrape annotations. |
+| `platform/observability/.../CorrelationIdContext.java` | MDC correlation handling; `fromHeader(Object)` decodes Kafka headers delivered as `String` or `byte[]`. |
+| `platform/observability/.../TraceContextHeaders.java` | Captures W3C context + baggage into outbox headers and `runInCapturedContext` restores it when the relay publishes, so the producer span continues the original request trace. |
+| `platform/observability/.../PharmacyBusinessMetrics.java`, `RecordBusinessMetric.java`, `OutboxMetricsRecorder.java` | Low-cardinality business outcome counters and outbox backlog/age gauges. |
+| `services/{order,inventory,payment}-service/...` outbox publishers | `readOutboxHeaders()` + `runInCapturedContext(...)` around `kafkaTemplate.send`; scheduler observations disabled so the relay does not create an unrelated parent span. |
+| `services/api-gateway/.../api/PublicHealthController.java` | Detail-free public `/actuator/health` on 8080; the real actuator (including Prometheus) lives on management port 9081. |
+| Service `SecurityConfig` classes | Actuator allow-list: health, liveness, readiness, info, prometheus are public; any other `/actuator/**` is denied. |
+| `infra/compose/prometheus.yml`, `infra/prometheus/alerts.yml` | Scrape config for all services (gateway via `api-gateway:9081`) and alert rules. |
+| `infra/compose/alloy.alloy` | Docker log discovery with relabeling to `service_name` and `container`. |
+| `infra/compose/otel-collector.yaml`, `tempo.yaml`, `loki.yaml` | Trace and log backends. |
+| `infra/grafana/dashboards/overview.json` | RED, JVM, Hikari, Kafka lag, business-outcome and outbox panels. |
+| `scripts/resilience-lab.sh` | Reproducible slow-span and Hikari contention drills. |
 
 ## Core concepts
 
@@ -72,12 +53,12 @@ downstream services
 | Actuator health groups | Liveness answers “should the process be restarted?” while readiness answers “should this instance receive traffic?” | Kubernetes probes depend on this split. A deadlocked app may fail liveness; a dependency outage may fail readiness only. |
 | Context propagation | Trace/correlation context must move across HTTP headers and Kafka headers, not just stay in one process. | Without propagation, every service sees a different “root,” making distributed debugging almost impossible. |
 | SLI/SLO thinking | An SLI is a measurable indicator (e.g., p95 latency); an SLO is the target (e.g., 95% of requests under 300 ms). | Strong observability is not only collection — it is also deciding what “good enough” service behavior means. |
-| Structured JSON logging | Instead of free-form text, logs are emitted as JSON with stable fields like `service`, `environment`, `traceId`, `spanId`, `correlationId`. | Structured logs enable reliable search, dashboards and alerting in Splunk/ELK/Loki. This repo has not reached that state yet. |
+| Structured JSON logging | Instead of free-form text, logs are emitted as JSON with stable fields like `service`, `environment`, `traceId`, `spanId`, `correlationId`. | Structured logs enable reliable search, dashboards and alerting in Splunk/ELK/Loki. Services emit Logstash-format JSON outside the local profile. |
 
 ## Common interview Q&A
 
 **Q: Why is enabling `/actuator/prometheus` not the same as “we have observability”?**  
-A: Because exposure is only one layer. You still need useful dashboards, alert rules, low-cardinality labels, meaningful business metrics, trace propagation, and searchable structured logs. This repo proves the endpoint exists; it does not yet prove a full observability practice exists.
+A: Because exposure is only one layer. You still need useful dashboards, alert rules, low-cardinality labels, meaningful business metrics, trace propagation, and searchable structured logs. This repo backs the endpoint with dashboards, alerts, Tempo traces and Loki logs, all verified at runtime.
 
 **Q: What is the practical difference between correlation ID and trace ID?**  
 A: Correlation ID is a platform-defined request key used in logs, error responses, and sometimes business support tooling. Trace ID comes from the tracing system and ties spans together automatically. In a mature system, logs contain both so you can jump from a log search to a trace view.
@@ -92,7 +73,7 @@ A: Readiness can depend on whether the app can safely serve traffic — e.g., Fl
 A: Averages flatten out tail latency. If 95% of requests are fast and 5% are very slow, the average may look okay while real users still suffer. Histograms enable p95/p99 views and SLO-style alerting.
 
 **Q: How should tracing work across Kafka?**  
-A: The producer should inject trace context into record headers; the consumer should extract it and create child spans so the asynchronous hop still appears in one distributed trace. That is conceptually required by Prompt 10, but not clearly implemented end-to-end in this repo.
+A: The producer should inject trace context into record headers; the consumer should extract it and create child spans so the asynchronous hop still appears in one distributed trace. This repo additionally stores the context in the outbox row so the relay can continue the original trace.
 
 **Q: What is a good first dashboard for this platform?**  
 A: Start with gateway and core business services using RED metrics: request rate, 4xx/5xx rate, p50/p95/p99 latency, then add JVM, Hikari, Kafka lag, outbox age, DLT volume, and a few low-cardinality business counters.
@@ -104,33 +85,29 @@ A: Traces show timing and causal path, but logs capture payload-independent deta
 A: A symptom alert tells you user-facing pain exists, like 5xx rate or p95 latency. A cause metric helps narrow the reason, like Hikari pending connections, JVM heap pressure, or Kafka lag. Good observability uses both.
 
 **Q: Why is “business metric” instrumentation different from auto-instrumentation?**  
-A: Auto-instrumentation gives you generic HTTP/JVM/Kafka timings, but business metrics tell you outcomes that matter to the domain: orders confirmed, reservations released, payment failures, DLT counts, outbox backlog. Those are mostly missing here.
+A: Auto-instrumentation gives you generic HTTP/JVM/Kafka timings, but business metrics tell you outcomes that matter to the domain: orders confirmed, reservations released, payment failures, DLT counts, outbox backlog. This repo records them through `@RecordBusinessMetric` and `OutboxMetricsRecorder`.
 
 ## Gotchas / real findings
 
-- **Actuator is real, but inconsistent.** Some services expose `health,info,metrics,prometheus`; others expose only `health,info,prometheus`; auth-service exposes readiness/liveness explicitly; product-service does not expose `metrics` in the same way as the gateway.
-- **Tracing dependencies exist more often than tracing configuration.** Several modules include `micrometer-tracing-bridge-otel` and `opentelemetry-exporter-otlp`, but the clearest OTLP endpoint property is only visible in `api-gateway/application.yml`.
-- **No explicit `management.tracing.*` or baggage propagation config was found** in service `application*.yml` files.
-- **Custom metrics are basically absent.** No meaningful `Counter.builder`, `Timer.builder`, `@Timed`, or business/outbox/DLT instrumentation was found in the code. That means the repo is relying mostly on Spring/Micrometer auto-instrumentation.
-- **Grafana is mostly a placeholder today.** `infra/grafana/dashboards/overview.json` contains an empty `panels` array, so the “dashboard exists” claim is technically true but operationally thin.
-- **Prometheus alerting is barely started.** `infra/prometheus/alerts.yml` only defines `ServiceDown`; Prompt 10 asked for much richer alerting like latency, 5xx rate, Hikari pressure, Kafka lag, DLT, and outbox age.
-- **The OTel Collector has no real backend exporter.** It exports to `logging`, not to Tempo/Jaeger/Dynatrace/etc., so traces are not landing in a normal trace UI.
-- **Structured JSON logging is not implemented.** Real configs use pattern-based plain text like `%d{ISO8601} %p %c [%t] ...`, not JSON encoders.
-- **Some services generate fresh correlation IDs inside exception handlers** instead of reusing the request correlation ID. For example, `auth-service` and `order-service` `GlobalExceptionHandler`s set `correlationId` to a new `UUID.randomUUID()`, which breaks end-to-end searchability.
-- **Kafka trace propagation is not demonstrably wired.** Kafka event classes may carry a `correlationId`, but that is not the same as true trace header propagation.
-- **Prometheus scrape coverage is incomplete.** The checked-in Compose scrape config only lists gateway, auth, inventory, order, and payment — not the whole 11-service platform.
-- **The observability docs are thinner than the code suggests.** `docs/11-observability.md` is only a short stub, so the best truth source here is still the actual configs and code.
+- **Actuator 401s hide from dashboards.** Prometheus showed targets DOWN until each service explicitly permitted `/actuator/prometheus`. The fix is an allow-list plus `denyAll()` for the rest, not a blanket `permitAll`.
+- **Multi-segment `additional-path` is rejected.** `management.endpoint.health.group.*.additional-path` accepts only one segment, so the gateway uses a tiny `PublicHealthController` for its public health check.
+- **Kafka headers are bytes.** Spring Cloud Stream delivers custom headers as `byte[]`; `getHeaders().get(name, String.class)` throws. Use `CorrelationIdContext.fromHeader`.
+- **Outbox relays break traces by default.** `KafkaTemplate` observation parents the producer span to whatever is current, which is the `@Scheduled` task. Restore the stored context per record and disable `tasks.scheduled.execution` observations.
+- **DLT partition mismatch.** Source topics have 3 partitions, DLTs have 1; bindings need `dlqPartitions: 1` or DLQ publishing fails.
+- **Loki needs labels.** Without relabeling, every container shares one stream; Alloy now maps the Compose service to `service_name`.
+- **Structured JSON logs** are enabled outside the local profile (`logging.structured.format.console=logstash`); the local console pattern still includes `[correlationId,traceId,spanId]`.
+- **Log hygiene was checked.** Container logs were scanned for bearer tokens, JWTs, passwords, emails and card data with no hits. Prescription-service's default Spring Security DEBUG logging was lowered to INFO.
 
 ## Trace-through
 
-**Real current-state example: a request enters the gateway and becomes observable at the edge**
+**Verified locally with `./scripts/resilience-lab.sh slow-payment 1500`**
 
-1. A client calls the gateway and may or may not send `X-Correlation-ID`.
-2. `CorrelationIdFilter` checks the header. If missing, it creates a UUID, stores it in the exchange, forwards it downstream, and adds it to the response.
-3. `LoggingFilter` uses MDC values like `correlationId`, `method`, `path`, `statusCode`, and `duration` to write request log lines.
-4. Because the gateway enables `http.server.requests` histogram and Actuator endpoints, Micrometer exposes request metrics that Prometheus can scrape from `/actuator/prometheus`.
-5. In local Compose, Prometheus can scrape the gateway target defined in `infra/compose/prometheus.yml`.
-6. Grafana could visualize those metrics, but the checked-in dashboard is currently empty, so the operator still has to build most panels.
-7. The gateway also has an OTLP endpoint property aimed at `otel-collector:4317`, but the collector currently logs received telemetry instead of sending it to a true trace backend.
-8. A Kubernetes deployment of the same gateway would also benefit from readiness/liveness probe paths and Prometheus scrape annotations shown in `infra/kubernetes/base/api-gateway.yaml`.
-9. Result: **edge correlation and basic metrics are real**, but the full “metric → trace UI → correlated structured logs” workflow described in Prompt 10 is not yet complete.
+1. The script sets the mock payment gateway to `DELAY 1500ms`, then posts an order through the gateway with its own `X-Correlation-ID`.
+2. order-service stores `OrderCreated` plus `traceparent`, baggage and correlation headers in its outbox; the relay restores that context and publishes.
+3. inventory reserves stock and publishes `InventoryReserved` the same way; payment consumes it and calls external-mock over HTTP.
+4. The order reaches `CONFIRMED`; notification and audit consume the payment events.
+5. The script finds the trace ID in Loki by correlation ID, then reads the trace from Tempo: **51 spans across 7 services**, slowest being `external-mock http post /api/v1/mock/process-payment` (~1.5 s) under `payment-service pharmacy.inventory.events.v1 receive`.
+
+**Hikari contention: `./scripts/resilience-lab.sh hikari 45 120`**
+
+- 120 workers for 45 s against order-service (~740 req/s, all 200) pushed `hikaricp_connections_pending` to 85 with 9–10 of 10 connections active and max acquire time ~360 ms. `HikariConnectionsPending` fires if this persists for 2 minutes.
