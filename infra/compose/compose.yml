@@ -1,6 +1,6 @@
 services:
   mysql:
-    image: mysql:8.4.3
+    image: mysql:26.7.0
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
     volumes:
@@ -15,7 +15,7 @@ services:
       - "3307:3306"
 
   redis:
-    image: redis:7.4.1
+    image: redis:8.10.0
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
@@ -358,7 +358,7 @@ services:
       - "8080:8080"
 
   prometheus:
-    image: prom/prometheus:v2.55.1
+    image: prom/prometheus:v3.15.0
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -366,12 +366,12 @@ services:
       - "9090:9090"
 
   grafana:
-    image: grafana/grafana:11.3.0
+    image: grafana/grafana:13.2.2
     ports:
       - "3000:3000"
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.110.0
+    image: otel/opentelemetry-collector-contrib:0.161.0
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
