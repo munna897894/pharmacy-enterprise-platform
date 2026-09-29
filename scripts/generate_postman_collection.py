@@ -638,8 +638,10 @@ payment_items = [
 notification_items = [
     request(
         "List My Notifications", "GET", "/api/v1/notifications",
-        "Lists notifications for the currently-authenticated user (order confirmation, etc.).",
-        query={"page": 0, "size": 20},
+        "Lists notifications for the caller's customer profile. customerId is the customer-service "
+        "Customer ID; notification-service asks customer-service whether the caller owns it (staff "
+        "roles may read any customer).",
+        query={"customerId": "{{customerId}}", "page": 0, "size": 20},
         auth_token_var="accessToken",
         pre_request=CORRELATION_PRE,
         tests=status_test(200) + [
@@ -648,14 +650,19 @@ notification_items = [
         ],
     ),
     request(
-        "Mark Notification Read", "PUT", "/api/v1/notifications/{{notificationId}}/read",
-        "Marks a notification as read; requires at least one notification to exist for this caller. "
-        "Given the documented customerId/sub cross-service ID mismatch (see 'List My Notifications' "
-        "above), notificationId is typically never populated, so this call hits an empty path segment "
-        "-- accepting 400 (malformed path) alongside 200/404 to keep the run non-blocking.",
+        "Get Notification", "GET", "/api/v1/notifications/{{notificationId}}",
+        "Reads one notification owned by the caller. notificationId is captured by 'List My "
+        "Notifications'; 404 is accepted when no notification has been delivered yet.",
         auth_token_var="accessToken",
         pre_request=CORRELATION_PRE,
-        tests=status_test([200, 400, 404]),
+        tests=status_test([200, 404]),
+    ),
+    request(
+        "Mark Notification Read", "PUT", "/api/v1/notifications/{{notificationId}}/read",
+        "Marks the caller's notification as read; 404 is accepted when no notification exists yet.",
+        auth_token_var="accessToken",
+        pre_request=CORRELATION_PRE,
+        tests=status_test([200, 404]),
     ),
     request(
         "List Notification Templates (Admin)", "GET", "/api/v1/notifications/templates",
@@ -827,16 +834,29 @@ happy_path_items = [
     ),
     request(
         "5. Verify Notification SENT", "GET", "/api/v1/notifications",
-        "Best-effort check for an order-confirmation notification. Notification.customerId is set from "
-        "the order event's customer-service Customer ID, while 'my notifications' is filtered by the "
-        "caller's own JWT 'sub' (auth-service User ID) -- different ID spaces, so this will typically "
-        "return an empty list for any single caller. Kept non-blocking (logs only); see e2e-runbook.md.",
-        query={"page": 0, "size": 20}, auth_token_var="accessToken", pre_request=CORRELATION_PRE,
-        tests=[
+        "Polls (bounded, 10 attempts) for a SENT notification for the order's customer. notification-service "
+        "authorizes the customer's own token through customer-service ownership.",
+        query={"customerId": "{{customerId}}", "page": 0, "size": 20}, auth_token_var="accessToken",
+        pre_request=[
+            "if (!pm.environment.get('notificationPollAttempts')) { pm.environment.set('notificationPollAttempts', '0'); }",
+        ] + CORRELATION_PRE,
+        tests=status_test(200) + [
             "const body = pm.response.json();",
-            "const sent = (body.content || []).some(function (n) { return n.status === 'SENT'; });",
-            "pm.test('Notification endpoint responds (content may be empty; see known cross-service ID gap)', function () { pm.expect(pm.response.code).to.eql(200); });",
-            "if (!sent) { console.warn('No SENT notification visible for this caller (expected given the documented customerId/sub mismatch)'); }",
+            "const sent = (body.content || []).find(function (n) { return n.status === 'SENT'; });",
+            "if (sent) {",
+            "    pm.environment.unset('notificationPollAttempts');",
+            "    pm.environment.set('notificationId', sent.id);",
+            "    pm.test('Order notification is SENT', function () { pm.expect(sent.status).to.eql('SENT'); });",
+            "} else {",
+            "    const attempts = parseInt(pm.environment.get('notificationPollAttempts') || '0', 10);",
+            "    if (attempts < 10) {",
+            "        pm.environment.set('notificationPollAttempts', String(attempts + 1));",
+            "        pm.execution.setNextRequest('5. Verify Notification SENT');",
+            "    } else {",
+            "        pm.environment.unset('notificationPollAttempts');",
+            "        pm.test('SENT notification observed within the bounded wait', function () { pm.expect.fail('No SENT notification after 10 retries'); });",
+            "    }",
+            "}",
         ],
     ),
     request(

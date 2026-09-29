@@ -119,7 +119,7 @@ Authorization is driven by `InventoryReserved` events.
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/notifications` | Owner/staff | Page simulated delivery records |
+| GET | `/api/v1/notifications?customerId={customerId}` | Owner/staff | Page simulated delivery records for one customer; `customerId` filter required, ownership verified via customer-service |
 | GET | `/api/v1/notifications/{id}` | Owner/staff | Delivery details |
 
 ## Audit service

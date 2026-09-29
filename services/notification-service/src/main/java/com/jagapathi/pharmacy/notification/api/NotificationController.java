@@ -1,39 +1,55 @@
 package com.jagapathi.pharmacy.notification.api;
 
+import com.jagapathi.pharmacy.notification.application.CustomerOwnershipLookupException;
+import com.jagapathi.pharmacy.notification.application.NotificationAccessService;
 import com.jagapathi.pharmacy.notification.application.NotificationService;
-import com.jagapathi.pharmacy.notification.domain.Channel;
-import com.jagapathi.pharmacy.notification.domain.NotificationType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
-import jakarta.validation.Valid;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/notifications")
 public class NotificationController {
-    
-    private final NotificationService notificationService;
 
-    public NotificationController(NotificationService notificationService) {
+    private static final Set<String> STAFF_AUTHORITIES =
+        Set.of("ROLE_PHARMACIST", "ROLE_STORE_MANAGER", "ROLE_ADMIN");
+
+    private final NotificationService notificationService;
+    private final NotificationAccessService notificationAccessService;
+
+    public NotificationController(NotificationService notificationService,
+                                  NotificationAccessService notificationAccessService) {
         this.notificationService = notificationService;
+        this.notificationAccessService = notificationAccessService;
     }
 
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Page<NotificationResponse>> listNotifications(
+            @RequestParam UUID customerId,
             Pageable pageable,
             Authentication authentication) {
-        UUID userId = getUserIdFromJwt(authentication);
-        Page<NotificationResponse> notifications = notificationService.getNotificationHistory(userId, pageable);
-        return ResponseEntity.ok(notifications);
+        return ResponseEntity.ok(notificationAccessService.listForCustomer(
+            customerId, pageable, jwt(authentication), isStaff(authentication)));
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<NotificationResponse> getNotification(
+            @PathVariable UUID id,
+            Authentication authentication) {
+        return ResponseEntity.ok(notificationAccessService.get(id, jwt(authentication), isStaff(authentication)));
     }
 
     @PutMapping("/{id}/read")
@@ -41,40 +57,49 @@ public class NotificationController {
     public ResponseEntity<NotificationResponse> markAsRead(
             @PathVariable UUID id,
             Authentication authentication) {
-        UUID userId = getUserIdFromJwt(authentication);
-        notificationService.markAsRead(id, userId);
-        NotificationResponse response = notificationService.getNotification(id, userId);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(notificationAccessService.markAsRead(id, jwt(authentication), isStaff(authentication)));
     }
 
     @GetMapping("/templates")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<TemplateResponse>> listTemplates() {
-        List<TemplateResponse> templates = notificationService.getAllTemplates();
-        return ResponseEntity.ok(templates);
+        return ResponseEntity.ok(notificationService.getAllTemplates());
     }
 
     @ExceptionHandler(NotificationNotFoundException.class)
-    public ResponseEntity<?> handleNotificationNotFound(NotificationNotFoundException e) {
-        return ResponseEntity.notFound().build();
+    public ResponseEntity<ProblemDetail> handleNotificationNotFound() {
+        return problem(HttpStatus.NOT_FOUND, "Notification not found", "The requested notification does not exist.");
     }
 
     @ExceptionHandler(UnauthorizedAccessException.class)
-    public ResponseEntity<?> handleUnauthorizedAccess(UnauthorizedAccessException e) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    public ResponseEntity<ProblemDetail> handleUnauthorizedAccess() {
+        return problem(HttpStatus.FORBIDDEN, "Forbidden", "You cannot access notifications for this customer.");
     }
 
     @ExceptionHandler(TemplateNotFoundException.class)
-    public ResponseEntity<?> handleTemplateNotFound(TemplateNotFoundException e) {
-        return ResponseEntity.notFound().build();
+    public ResponseEntity<ProblemDetail> handleTemplateNotFound() {
+        return problem(HttpStatus.NOT_FOUND, "Template not found", "The requested template does not exist.");
     }
 
-    private UUID getUserIdFromJwt(Authentication authentication) {
-        Jwt jwt = (Jwt) authentication.getPrincipal();
-        // auth-service issues the user's ID as the standard "sub" claim, not a custom
-        // "userId" claim (see customer-service's CustomerController.extractUserId for the
-        // same established pattern elsewhere in the codebase).
-        String userIdStr = jwt.getClaimAsString("sub");
-        return UUID.fromString(userIdStr);
+    @ExceptionHandler(CustomerOwnershipLookupException.class)
+    public ResponseEntity<ProblemDetail> handleOwnershipLookupFailure() {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, "Customer ownership verification unavailable",
+            "Notification access cannot be verified right now.");
+    }
+
+    private static ResponseEntity<ProblemDetail> problem(HttpStatus status, String title, String detail) {
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(status, detail);
+        problemDetail.setTitle(title);
+        return ResponseEntity.status(status).body(problemDetail);
+    }
+
+    private static Jwt jwt(Authentication authentication) {
+        return (Jwt) authentication.getPrincipal();
+    }
+
+    private static boolean isStaff(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+            .map(GrantedAuthority::getAuthority)
+            .anyMatch(STAFF_AUTHORITIES::contains);
     }
 }

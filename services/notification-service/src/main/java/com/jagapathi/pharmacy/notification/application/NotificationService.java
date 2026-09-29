@@ -6,7 +6,6 @@ import com.jagapathi.pharmacy.notification.api.NotificationResponse;
 import com.jagapathi.pharmacy.notification.api.TemplateResponse;
 import com.jagapathi.pharmacy.notification.api.NotificationNotFoundException;
 import com.jagapathi.pharmacy.notification.api.TemplateNotFoundException;
-import com.jagapathi.pharmacy.notification.api.UnauthorizedAccessException;
 import com.jagapathi.pharmacy.notification.domain.*;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationRepository;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationTemplateRepository;
@@ -85,25 +84,18 @@ public class NotificationService {
     }
 
     @Transactional(readOnly = true)
-    public NotificationResponse getNotification(UUID notificationId, UUID requestingUserId) {
-        Notification notification = notificationRepository.findById(notificationId)
-            .orElseThrow(() -> new NotificationNotFoundException("Notification not found: " + notificationId));
-
-        if (!notification.getCustomerId().equals(requestingUserId)) {
-            throw new UnauthorizedAccessException("Cannot access this notification");
-        }
-
-        return toResponse(notification);
+    public UUID getNotificationOwner(UUID notificationId) {
+        return findNotification(notificationId).getCustomerId();
     }
 
-    public void markAsRead(UUID notificationId, UUID requestingUserId) {
-        Notification notification = notificationRepository.findById(notificationId)
-            .orElseThrow(() -> new NotificationNotFoundException("Notification not found: " + notificationId));
+    @Transactional(readOnly = true)
+    public NotificationResponse getNotification(UUID notificationId) {
+        return toResponse(findNotification(notificationId));
+    }
 
-        if (!notification.getCustomerId().equals(requestingUserId)) {
-            throw new UnauthorizedAccessException("Cannot mark this notification as read");
-        }
-
+    @Transactional
+    public void markAsRead(UUID notificationId) {
+        Notification notification = findNotification(notificationId);
         notification.markAsRead();
         notificationRepository.save(notification);
     }
@@ -142,6 +134,11 @@ public class NotificationService {
             case SMS -> variables.getOrDefault("phone", "+1234567890");
             case IN_APP -> "IN_APP";
         };
+    }
+
+    private Notification findNotification(UUID notificationId) {
+        return notificationRepository.findById(notificationId)
+            .orElseThrow(() -> new NotificationNotFoundException("Notification not found: " + notificationId));
     }
 
     private NotificationResponse toResponse(Notification notification) {

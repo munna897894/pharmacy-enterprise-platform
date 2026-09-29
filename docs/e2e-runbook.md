@@ -109,20 +109,15 @@ cases, and the order/payment/inventory choreography-saga scenarios.
   argument-resolution-before-`@PreAuthorize` ordering (validation errors
   surface as 400 before the authorization check ever runs).
 
-## Remaining known gaps
+## Resolved gaps
 
-- **Notification ownership still compares unrelated identifiers**:
-  notification-service filters notification `customerId` against JWT `sub`,
-  while they are independently generated customer and auth-user IDs. The
-  notification list may therefore be empty for the owning customer; its
-  Newman check remains best-effort. This is separate from payment-service,
-  which now checks ownership through customer-service.
-- **Pre-existing, unrelated test failure**: `StockLevelTest.testCreateStockLevel`
-  asserts `getVersion()).isZero()`, but `StockLevel`'s constructor
-  intentionally leaves `version` as `null` (see the code comment on Spring
-  Data JPA's `isNew()` semantics). This is a genuine pre-existing test bug,
-  unrelated to this session's changes, left untouched per the "don't fix
-  unrelated pre-existing issues" / "don't disable failing tests" rules.
+- **Notification ownership**: `GET /api/v1/notifications` now requires a
+  `customerId` filter, and notification reads/updates authorize customers by
+  asking customer-service whether the caller owns that customer profile (staff
+  roles bypass the lookup). The happy-path Newman step now polls, with a bounded
+  wait, for a `SENT` notification instead of logging a best-effort warning.
+- **`StockLevelTest.testCreateStockLevel`**: now expects a `null` version for a
+  new entity, matching the documented Spring Data `isNew()` behavior.
 
 ## Known environment quirks (not application bugs)
 

@@ -105,7 +105,7 @@ class NotificationServiceTest {
         when(notificationRepository.findById(notificationId))
                 .thenReturn(Optional.of(notification));
 
-        notificationService.markAsRead(notificationId, customerId);
+        notificationService.markAsRead(notificationId);
 
         verify(notificationRepository).save(notification);
         assertThat(notification.getReadAt()).isNotNull();

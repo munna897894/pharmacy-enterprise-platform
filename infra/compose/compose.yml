@@ -290,6 +290,7 @@ services:
       DB_HOST: mysql
       DB_PORT: "3306"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CUSTOMER_SERVICE_BASE_URL: http://customer-service:8083
     depends_on:
       mysql:
         condition: service_healthy

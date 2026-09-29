@@ -112,6 +112,10 @@ management:
 external-service:
   url: http://external-mock-service:8080
 
+customer:
+  service:
+    base-url: ${CUSTOMER_SERVICE_BASE_URL:http://customer-service:8083}
+
 logging:
   level:
     root: INFO
