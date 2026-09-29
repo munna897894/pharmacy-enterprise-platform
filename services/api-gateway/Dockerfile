@@ -12,6 +12,6 @@ RUN useradd -r -u 10001 appuser
 COPY --from=build /workspace/services/api-gateway/target/api-gateway-0.0.1-SNAPSHOT.jar app.jar
 RUN chown 10001:10001 /app/app.jar
 USER 10001
-EXPOSE 8080
+EXPOSE 8080 9081
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseG1GC"
 ENTRYPOINT ["java","-jar","/app/app.jar"]

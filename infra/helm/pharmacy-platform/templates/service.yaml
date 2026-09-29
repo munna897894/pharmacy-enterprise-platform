@@ -7,7 +7,7 @@ metadata:
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/path: /actuator/prometheus
-    prometheus.io/port: "{{ $svc.port }}"
+    prometheus.io/port: "{{ $svc.managementPort | default $svc.port }}"
 spec:
   replicas: 1
   selector:
@@ -23,6 +23,10 @@ spec:
           image: {{ $svc.image }}
           ports:
             - containerPort: {{ $svc.port }}
+            {{- if $svc.managementPort }}
+            - containerPort: {{ $svc.managementPort }}
+              name: management
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: pharmacy-common

@@ -31,7 +31,8 @@ public class SecurityConfiguration {
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             .and()
             .authorizeHttpRequests(authz -> authz
-                .requestMatchers("/actuator/**").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness", "/actuator/info", "/actuator/prometheus").permitAll()
+                .requestMatchers("/actuator/**").denyAll()
                 .requestMatchers("/api/v1/**").authenticated()
                 .anyRequest().authenticated()
             )

@@ -25,7 +25,9 @@ public class SecurityConfig {
     private static final String[] ACTUATOR_ENDPOINTS = {
         "/actuator/health",
         "/actuator/health/**",
-        "/actuator/info"
+        "/actuator/info",
+        // Served only on the internal management port; the public traffic port has no such route.
+        "/actuator/prometheus"
     };
 
     @Bean

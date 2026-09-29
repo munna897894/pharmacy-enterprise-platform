@@ -34,6 +34,9 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
+              name: http
+            - containerPort: 9081
+              name: management
           env:
             - name: REDIS_HOST
               value: redis
@@ -46,13 +49,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: 8080
+              port: 9081
             initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: 8080
+              port: 9081
             initialDelaySeconds: 30
             periodSeconds: 15
       volumes:

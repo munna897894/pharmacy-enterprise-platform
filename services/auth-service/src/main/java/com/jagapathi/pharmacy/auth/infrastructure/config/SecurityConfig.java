@@ -29,7 +29,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/refresh").permitAll()
                         .requestMatchers("/api/v1/auth/validate").permitAll()
                         .requestMatchers("/api/v1/auth/.well-known/jwks.json").permitAll()
-                        .requestMatchers("/actuator/**").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness", "/actuator/info", "/actuator/prometheus").permitAll()
+                        .requestMatchers("/actuator/**").denyAll()
                         .anyRequest().authenticated()
                 );
 

@@ -36,6 +36,9 @@ spec:
               mountPath: /tmp
           ports:
             - containerPort: 8080
+              name: http
+            - containerPort: 9081
+              name: management
           env:
             - name: AUTH_SERVICE_HOST
               value: "auth-service"
@@ -52,14 +55,14 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: 8080
+              port: 9081
             initialDelaySeconds: 45
             periodSeconds: 10
             failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: 8080
+              port: 9081
             initialDelaySeconds: 90
             periodSeconds: 15
             failureThreshold: 5
@@ -82,7 +85,7 @@ metadata:
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/path: /actuator/prometheus
-    prometheus.io/port: "8080"
+    prometheus.io/port: "9081"
 spec:
   selector:
     app: api-gateway

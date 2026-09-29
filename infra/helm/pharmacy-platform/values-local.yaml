@@ -15,6 +15,7 @@ services:
   api-gateway:
     image: pharmacy/api-gateway:local
     port: 8080
+    managementPort: 9081
   auth-service:
     image: pharmacy/auth-service:local
     port: 8081

@@ -21,7 +21,7 @@ spec:
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/path: /actuator/prometheus
-        prometheus.io/port: "8080"
+        prometheus.io/port: "9081"
     spec:
       terminationGracePeriodSeconds: 30
       securityContext:
@@ -44,6 +44,9 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
+              name: http
+            - containerPort: 9081
+              name: management
           envFrom:
             - configMapRef:
                 name: pharmacy-common
@@ -53,12 +56,12 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: 8080
+              port: 9081
             initialDelaySeconds: 20
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: 8080
+              port: 9081
             initialDelaySeconds: 30
           resources:
             requests:

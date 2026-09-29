@@ -59,8 +59,8 @@ management:
 logging:
   level:
     root: INFO
-    com.jagapathi.pharmacy: DEBUG
-    org.springframework.security: DEBUG
+    com.jagapathi.pharmacy: ${PHARMACY_LOG_LEVEL:INFO}
+    org.springframework.security: INFO
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] - %msg%n"
 
