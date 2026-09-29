@@ -21,6 +21,9 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "org.apache.tomcat.embed:*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Testcontainers 2.x renames modules; Spring Boot 3.5 manages 1.x.
+      - dependency-name: "org.testcontainers:*"
+        update-types: ["version-update:semver-major"]
     groups:
       maven-patch-minor:
         update-types: [patch, minor]
@@ -63,6 +66,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Local infra only takes same-major refreshes; MySQL stays on the 8.4 LTS line.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: mysql
+        update-types: ["version-update:semver-minor"]
     groups:
       compose-images:
         patterns: ["*"]
