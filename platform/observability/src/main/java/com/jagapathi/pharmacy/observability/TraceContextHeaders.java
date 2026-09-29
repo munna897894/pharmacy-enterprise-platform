@@ -3,7 +3,9 @@ package com.jagapathi.pharmacy.observability;
 import io.opentelemetry.api.baggage.propagation.W3CBaggagePropagator;
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.Context;
-import io.opentelemetry.context.propagation.ContextPropagators;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.context.propagation.TextMapGetter;
+import io.opentelemetry.context.propagation.TextMapPropagator;
 import org.slf4j.MDC;
 
 import java.util.LinkedHashMap;
@@ -15,7 +17,37 @@ public final class TraceContextHeaders {
         "traceparent", "tracestate", "baggage", CorrelationIdContext.HEADER_NAME
     );
 
+    private static final TextMapPropagator PROPAGATOR = TextMapPropagator.composite(
+        W3CTraceContextPropagator.getInstance(),
+        W3CBaggagePropagator.getInstance()
+    );
+
+    private static final TextMapGetter<Map<String, String>> MAP_GETTER = new TextMapGetter<>() {
+        @Override
+        public Iterable<String> keys(Map<String, String> carrier) {
+            return carrier.keySet();
+        }
+
+        @Override
+        public String get(Map<String, String> carrier, String key) {
+            return carrier == null ? null : carrier.get(key);
+        }
+    };
+
     private TraceContextHeaders() {
+    }
+
+    /**
+     * Runs an action (typically an outbox relay send) as a continuation of the trace and
+     * correlation ID captured when the outbox row was written, so producer spans join the
+     * originating request's trace instead of the relay's scheduler.
+     */
+    public static void runInCapturedContext(Map<String, String> capturedHeaders, Runnable action) {
+        Map<String, String> headers = capturedHeaders == null ? Map.of() : capturedHeaders;
+        Context parent = PROPAGATOR.extract(Context.root(), headers, MAP_GETTER);
+        try (Scope ignored = parent.makeCurrent()) {
+            CorrelationIdContext.runWithCorrelationId(headers.get(CorrelationIdContext.HEADER_NAME), action);
+        }
     }
 
     public static boolean isAllowedHeader(String name) {
@@ -24,13 +56,7 @@ public final class TraceContextHeaders {
 
     public static Map<String, String> capture() {
         Map<String, String> headers = new LinkedHashMap<>();
-        ContextPropagators propagators = ContextPropagators.create(
-            io.opentelemetry.context.propagation.TextMapPropagator.composite(
-                W3CTraceContextPropagator.getInstance(),
-                W3CBaggagePropagator.getInstance()
-            )
-        );
-        propagators.getTextMapPropagator().inject(Context.current(), headers, (carrier, key, value) ->
+        PROPAGATOR.inject(Context.current(), headers, (carrier, key, value) ->
             carrier.put(key, value));
         String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
         if (correlationId != null && !correlationId.isBlank()) {

@@ -2,11 +2,28 @@ discovery.docker "local" {
   host = "unix:///var/run/docker.sock"
 }
 
+// Label each stream with its compose service so Grafana/Loki can filter by service_name.
+discovery.relabel "compose_services" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service_name"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
 loki.source.docker "local" {
-  host       = "unix:///var/run/docker.sock"
-  targets    = discovery.docker.local.targets
-  labels     = { environment = "local" }
-  forward_to = [loki.write.local.receiver]
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.local.targets
+  labels        = { environment = "local" }
+  relabel_rules = discovery.relabel.compose_services.rules
+  forward_to    = [loki.write.local.receiver]
 }
 
 loki.write "local" {

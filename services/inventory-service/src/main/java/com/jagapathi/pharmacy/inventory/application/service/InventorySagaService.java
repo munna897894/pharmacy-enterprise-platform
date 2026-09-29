@@ -197,8 +197,10 @@ public class InventorySagaService {
             try {
                 var record = new org.apache.kafka.clients.producer.ProducerRecord<String, String>(
                     event.getTopic(), event.getEventKey(), event.getPayload());
-                applyOutboxHeaders(event.getHeaders(), record.headers());
-                kafkaTemplate.send(record);
+                var capturedHeaders = readOutboxHeaders(event.getHeaders());
+                capturedHeaders.forEach((name, value) ->
+                    record.headers().add(name, value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                TraceContextHeaders.runInCapturedContext(capturedHeaders, () -> kafkaTemplate.send(record));
                 event.recordPublishSuccess();
                 publishedCount++;
             } catch (Exception e) {
@@ -218,19 +220,19 @@ public class InventorySagaService {
         return new OutboxMetricsSnapshot(pendingEvents.size(), oldestAgeSeconds, publishedCount, failedCount);
     }
 
-    private void applyOutboxHeaders(String serializedHeaders, org.apache.kafka.common.header.Headers target)
-        throws Exception {
+    private java.util.Map<String, String> readOutboxHeaders(String serializedHeaders) throws Exception {
+        var allowed = new java.util.LinkedHashMap<String, String>();
         if (serializedHeaders == null || serializedHeaders.isBlank()) {
-            return;
+            return allowed;
         }
-        var headers = objectMapper.readTree(serializedHeaders);
-        var fields = headers.fields();
+        var fields = objectMapper.readTree(serializedHeaders).fields();
         while (fields.hasNext()) {
             var entry = fields.next();
             if (TraceContextHeaders.isAllowedHeader(entry.getKey()) && entry.getValue().isTextual()) {
-                target.add(entry.getKey(), entry.getValue().asText().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                allowed.put(entry.getKey(), entry.getValue().asText());
             }
         }
+        return allowed;
     }
 
     private String writeItemsJson(List<ReservationItem> items) {

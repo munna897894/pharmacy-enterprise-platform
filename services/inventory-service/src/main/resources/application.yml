@@ -47,6 +47,10 @@ spring:
       observation-enabled: true
 
 management:
+  observations:
+    enable:
+      # Outbox relays continue the trace stored with each outbox row; a scheduler span would otherwise become the parent.
+      "[tasks.scheduled.execution]": false
   endpoints:
     web:
       exposure:

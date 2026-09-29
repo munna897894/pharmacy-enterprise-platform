@@ -50,7 +50,7 @@ public class KafkaConsumerConfig {
 
     private Consumer<Message<String>> consumer(AuditResourceType resourceType) {
         return message -> CorrelationIdContext.runWithCorrelationId(
-            message.getHeaders().get(CorrelationIdContext.HEADER_NAME, String.class),
+            CorrelationIdContext.fromHeader(message.getHeaders().get(CorrelationIdContext.HEADER_NAME)),
             () -> auditEventProcessor.process(message.getPayload(), resourceType)
         );
     }
