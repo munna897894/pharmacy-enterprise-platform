@@ -6,7 +6,7 @@ COPY services services
 RUN mvn -q -pl services/inventory-service -am dependency:go-offline
 RUN mvn -q -pl services/inventory-service -am package -DskipTests
 
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 WORKDIR /app
 RUN useradd -r -u 10001 appuser
 COPY --from=build /workspace/services/inventory-service/target/inventory-service-0.0.1-SNAPSHOT.jar app.jar
