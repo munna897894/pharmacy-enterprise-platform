@@ -22,39 +22,54 @@ spring:
       minimum-idle: 2
       connection-timeout: 10000
   cloud:
+    function:
+      definition: "orderEventConsumer;paymentEventConsumer;prescriptionEventConsumer"
     stream:
       kafka:
         binder:
           brokers: ${KAFKA_BOOTSTRAP_SERVERS:host.docker.internal:9092}
           auto-add-partitions: false
           enable-observation: true
+        bindings:
+          orderEventConsumer-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: pharmacy.order.events.v1.dlt
+              dlqPartitions: 1
+              # New groups begin at the log end instead of replaying history that predates the projection.
+              startOffset: latest
+          paymentEventConsumer-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: pharmacy.payment.events.v1.dlt
+              dlqPartitions: 1
+              startOffset: latest
+          prescriptionEventConsumer-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: pharmacy.prescription.events.v1.dlt
+              dlqPartitions: 1
+              startOffset: latest
       bindings:
-        orderCreatedConsumer-in-0:
+        orderEventConsumer-in-0:
           destination: pharmacy.order.events.v1
           group: notification-order-events-v1
           consumer:
-            start-offset: earliest
-        orderShippedConsumer-in-0:
-          destination: pharmacy.order.events.v1
-          group: notification-order-events-v1
-        paymentProcessedConsumer-in-0:
+            max-attempts: 3
+        paymentEventConsumer-in-0:
           destination: pharmacy.payment.events.v1
           group: notification-payment-events-v1
           consumer:
-            start-offset: earliest
-        prescriptionFilledConsumer-in-0:
+            # Payment events can outrun the OrderCreated projection; retry with backoff before DLT.
+            max-attempts: 5
+            back-off-initial-interval: 1000
+            back-off-multiplier: 2.0
+            back-off-max-interval: 8000
+        prescriptionEventConsumer-in-0:
           destination: pharmacy.prescription.events.v1
           group: notification-prescription-events-v1
           consumer:
-            start-offset: earliest
-        prescriptionExpiringConsumer-in-0:
-          destination: pharmacy.prescription.events.v1
-          group: notification-prescription-events-v1
-        lowStockConsumer-in-0:
-          destination: pharmacy.inventory.events.v1
-          group: notification-inventory-events-v1
-          consumer:
-            start-offset: earliest
+            max-attempts: 3
   mail:
     host: localhost
     port: 1025
@@ -136,3 +151,8 @@ logging:
       add:
         service: ${spring.application.name}
         environment: ${ENVIRONMENT:prod}
+
+notification:
+  email:
+    # simulated (default) records delivery without SMTP; smtp sends through spring.mail.*
+    mode: ${NOTIFICATION_EMAIL_MODE:simulated}

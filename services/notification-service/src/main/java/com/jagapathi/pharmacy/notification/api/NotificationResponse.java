@@ -11,6 +11,7 @@ import java.util.UUID;
 public record NotificationResponse(
     UUID id,
     UUID customerId,
+    UUID orderId,
     NotificationType type,
     Channel channel,
     String recipient,

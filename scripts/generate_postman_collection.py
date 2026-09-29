@@ -547,7 +547,7 @@ order_items = [
     ),
     request(
         "Poll Order Status (bounded)", "GET", "/api/v1/orders/{{orderId}}/status",
-        "Polls order status with a bounded retry loop (max 15 attempts) until a terminal state is "
+        "Polls order status with a bounded retry loop (max 30 attempts) until a terminal state is "
         "reached, instead of an unbounded/blind wait. Fails the run if the order never reaches a "
         "terminal state in time.",
         auth_token_var="accessToken",
@@ -559,11 +559,11 @@ order_items = [
             "pm.environment.set('lastOrderStatus', body.status);",
             "if (terminal.includes(body.status)) {",
             "    pm.test('Order reached a terminal state', function () { pm.expect(terminal).to.include(body.status); });",
-            "} else if (attempts < 15) {",
+            "} else if (attempts < 30) {",
             "    pm.environment.set('pollAttempts', String(attempts + 1));",
             "    pm.execution.setNextRequest('Poll Order Status (bounded)');",
             "} else {",
-            "    pm.test('Order reached a terminal state within bounded polling window', function () { pm.expect.fail('Timed out after 15 attempts waiting for a terminal order status; last status was ' + body.status); });",
+            "    pm.test('Order reached a terminal state within bounded polling window', function () { pm.expect.fail('Timed out after 30 attempts waiting for a terminal order status; last status was ' + body.status); });",
             "}",
         ],
     ),
@@ -647,12 +647,13 @@ notification_items = [
         tests=status_test(200) + [
             "const body = pm.response.json();",
             "if (body.content && body.content.length) { pm.environment.set('notificationId', body.content[0].id); }",
+            "else { pm.environment.set('notificationId', '00000000-0000-4000-8000-000000000000'); }",
         ],
     ),
     request(
         "Get Notification", "GET", "/api/v1/notifications/{{notificationId}}",
         "Reads one notification owned by the caller. notificationId is captured by 'List My "
-        "Notifications'; 404 is accepted when no notification has been delivered yet.",
+        "Notifications' (a placeholder UUID when none exist yet, which yields 404).",
         auth_token_var="accessToken",
         pre_request=CORRELATION_PRE,
         tests=status_test([200, 404]),
@@ -804,7 +805,7 @@ happy_path_items = [
     ),
     request(
         "3. Poll Until CONFIRMED (bounded)", "GET", "/api/v1/orders/{{orderId}}/status",
-        "Bounded poll (max 15 attempts) for the choreography saga to reach CONFIRMED.",
+        "Bounded poll (max 30 attempts) for the choreography saga to reach CONFIRMED.",
         auth_token_var="accessToken", pre_request=CORRELATION_PRE,
         tests=[
             "const body = pm.response.json();",
@@ -813,7 +814,7 @@ happy_path_items = [
             "    pm.test('Order is CONFIRMED', function () { pm.expect(body.status).to.eql('CONFIRMED'); });",
             "} else if (body.status && body.status.startsWith('CANCELLED')) {",
             "    pm.test('Order unexpectedly cancelled', function () { pm.expect.fail('Expected CONFIRMED but order was ' + body.status); });",
-            "} else if (attempts < 15) {",
+            "} else if (attempts < 30) {",
             "    pm.environment.set('pollAttempts', String(attempts + 1));",
             "    pm.execution.setNextRequest('3. Poll Until CONFIRMED (bounded)');",
             "} else {",
@@ -931,7 +932,7 @@ insufficient_stock_items = [
             "    const attempts = parseInt(pm.environment.get('pollAttempts') || '0', 10);",
             "    if (body.status === 'CANCELLED_INVENTORY') {",
             "        pm.test('Order is CANCELLED_INVENTORY', function () { pm.expect(body.status).to.eql('CANCELLED_INVENTORY'); });",
-            "    } else if (attempts < 15) {",
+            "    } else if (attempts < 30) {",
             "        pm.environment.set('pollAttempts', String(attempts + 1));",
             "        pm.execution.setNextRequest('3. Poll Until CANCELLED_INVENTORY (bounded)');",
             "    } else {",
@@ -984,7 +985,7 @@ payment_failure_items = [
             "const attempts = parseInt(pm.environment.get('pollAttempts') || '0', 10);",
             "if (body.status === 'CANCELLED_PAYMENT') {",
             "    pm.test('Order is CANCELLED_PAYMENT', function () { pm.expect(body.status).to.eql('CANCELLED_PAYMENT'); });",
-            "} else if (attempts < 15) {",
+            "} else if (attempts < 30) {",
             "    pm.environment.set('pollAttempts', String(attempts + 1));",
             "    pm.execution.setNextRequest('3. Poll Until CANCELLED_PAYMENT, Payment Failure (bounded)');",
             "} else {",

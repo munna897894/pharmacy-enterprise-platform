@@ -167,7 +167,7 @@ class NotificationControllerTest {
 
     private static NotificationResponse response() {
         Instant now = Instant.parse("2026-09-01T10:00:00Z");
-        return new NotificationResponse(NOTIFICATION_ID, CUSTOMER_ID, NotificationType.ORDER_CONFIRMATION,
+        return new NotificationResponse(NOTIFICATION_ID, CUSTOMER_ID, null, NotificationType.ORDER_CONFIRMATION,
             Channel.EMAIL, "customer@example.test", "Subject", "Message", NotificationStatus.SENT,
             now, null, now, now);
     }

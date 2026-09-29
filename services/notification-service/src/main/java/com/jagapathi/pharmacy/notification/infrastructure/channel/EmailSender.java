@@ -2,11 +2,13 @@ package com.jagapathi.pharmacy.notification.infrastructure.channel;
 
 import com.jagapathi.pharmacy.notification.domain.Channel;
 import com.jagapathi.pharmacy.notification.domain.Notification;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(name = "notification.email.mode", havingValue = "smtp")
 public class EmailSender implements NotificationSender {
     
     private final JavaMailSender mailSender;

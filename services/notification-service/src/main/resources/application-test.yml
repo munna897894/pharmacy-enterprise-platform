@@ -17,37 +17,32 @@ spring:
     host: localhost
     port: 3025
   cloud:
+    function:
+      definition: "orderEventConsumer;paymentEventConsumer;prescriptionEventConsumer"
     stream:
       kafka:
         binder:
           brokers: localhost:9092
       bindings:
-        orderCreatedConsumer-in-0:
+        orderEventConsumer-in-0:
           destination: pharmacy.order.events.v1
           group: notification-order-events-v1
           consumer:
-            start-offset: earliest
-        orderShippedConsumer-in-0:
-          destination: pharmacy.order.events.v1
-          group: notification-order-events-v1
-        paymentProcessedConsumer-in-0:
+            max-attempts: 3
+        paymentEventConsumer-in-0:
           destination: pharmacy.payment.events.v1
           group: notification-payment-events-v1
           consumer:
-            start-offset: earliest
-        prescriptionFilledConsumer-in-0:
+            # Payment events can outrun the OrderCreated projection; retry with backoff before DLT.
+            max-attempts: 5
+            back-off-initial-interval: 1000
+            back-off-multiplier: 2.0
+            back-off-max-interval: 8000
+        prescriptionEventConsumer-in-0:
           destination: pharmacy.prescription.events.v1
           group: notification-prescription-events-v1
           consumer:
-            start-offset: earliest
-        prescriptionExpiringConsumer-in-0:
-          destination: pharmacy.prescription.events.v1
-          group: notification-prescription-events-v1
-        lowStockConsumer-in-0:
-          destination: pharmacy.inventory.events.v1
-          group: notification-inventory-events-v1
-          consumer:
-            start-offset: earliest
+            max-attempts: 3
   security:
     oauth2:
       resourceserver:

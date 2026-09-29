@@ -34,8 +34,13 @@ public class NotificationService {
         this.senders = senders;
     }
 
-    @RecordBusinessMetric(BusinessMetric.NOTIFICATION_DELIVERY)
     public void sendNotification(UUID customerId, NotificationType type, List<Channel> channels,
+                                Map<String, String> variables) {
+        sendNotification(customerId, null, type, channels, variables);
+    }
+
+    @RecordBusinessMetric(BusinessMetric.NOTIFICATION_DELIVERY)
+    public void sendNotification(UUID customerId, UUID orderId, NotificationType type, List<Channel> channels,
                                 Map<String, String> variables) {
         for (Channel channel : channels) {
             NotificationTemplate template = templateRepository
@@ -43,7 +48,7 @@ public class NotificationService {
                 .orElseThrow(() -> new TemplateNotFoundException(
                     "Template not found for type=" + type + ", channel=" + channel));
 
-            Notification notification = createNotification(customerId, type, channel, template, variables);
+            Notification notification = createNotification(customerId, orderId, type, channel, template, variables);
             publishNotification(notification, channel);
         }
     }
@@ -118,14 +123,14 @@ public class NotificationService {
         return toTemplateResponse(template);
     }
 
-    private Notification createNotification(UUID customerId, NotificationType type, Channel channel,
+    private Notification createNotification(UUID customerId, UUID orderId, NotificationType type, Channel channel,
                                            NotificationTemplate template, Map<String, String> variables) {
         UUID id = UUID.randomUUID();
         String recipient = getRecipientFromVariables(channel, variables);
         String subject = template.renderSubject(variables);
         String message = template.renderMessage(variables);
 
-        return new Notification(id, customerId, type, channel, recipient, subject, message);
+        return new Notification(id, customerId, orderId, type, channel, recipient, subject, message);
     }
 
     private String getRecipientFromVariables(Channel channel, Map<String, String> variables) {
@@ -145,6 +150,7 @@ public class NotificationService {
         return new NotificationResponse(
             notification.getId(),
             notification.getCustomerId(),
+            notification.getOrderId(),
             notification.getType(),
             notification.getChannel(),
             notification.getRecipient(),

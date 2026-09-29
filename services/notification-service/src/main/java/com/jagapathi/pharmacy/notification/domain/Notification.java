@@ -13,6 +13,9 @@ public class Notification {
     
     @Column(name = "customer_id", nullable = false)
     private UUID customerId;
+
+    @Column(name = "order_id")
+    private UUID orderId;
     
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false)
@@ -55,7 +58,13 @@ public class Notification {
 
     public Notification(UUID id, UUID customerId, NotificationType type, Channel channel,
                        String recipient, String subject, String message) {
+        this(id, customerId, null, type, channel, recipient, subject, message);
+    }
+
+    public Notification(UUID id, UUID customerId, UUID orderId, NotificationType type, Channel channel,
+                       String recipient, String subject, String message) {
         this.id = id;
+        this.orderId = orderId;
         this.customerId = customerId;
         this.type = type;
         this.channel = channel;
@@ -74,6 +83,10 @@ public class Notification {
 
     public void setId(UUID id) {
         this.id = id;
+    }
+
+    public UUID getOrderId() {
+        return orderId;
     }
 
     public UUID getCustomerId() {
