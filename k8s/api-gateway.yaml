@@ -13,9 +13,24 @@ spec:
       labels:
         app: api-gateway
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api-gateway
           image: docker.io/munna897/pharmacy-api-gateway:local-20260917-1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -40,6 +55,9 @@ spec:
               port: 8080
             initialDelaySeconds: 30
             periodSeconds: 15
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

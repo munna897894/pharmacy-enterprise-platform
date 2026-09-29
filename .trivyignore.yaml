@@ -1,0 +1,27 @@
+# Accepted risks for the short-lived, cost-capped AWS sandbox (see docs/aws-plan-review.md).
+# Each entry is path-scoped; do not add global IDs. Revisit before any non-sandbox environment.
+misconfigurations:
+  - id: AWS-0132
+    paths:
+      - infra/terraform/bootstrap/main.tf
+    statement: State bucket uses SSE-KMS with the AWS-managed key; a customer-managed key adds cost without isolation benefit for a single-account sandbox.
+  - id: AWS-0039
+    paths:
+      - infra/terraform/modules/eks/main.tf
+    statement: Application secrets live in AWS Secrets Manager and are fetched via IRSA, not stored as Kubernetes Secrets.
+  - id: AWS-0040
+    paths:
+      - infra/terraform/modules/eks/main.tf
+    statement: Public API endpoint is required for operator kubectl access without a bastion/VPN in the sandbox.
+  - id: AWS-0041
+    paths:
+      - infra/terraform/modules/eks/main.tf
+    statement: Public endpoint CIDR is open for the same reason; access still requires IAM-authenticated credentials.
+  - id: AWS-0104
+    paths:
+      - infra/terraform/modules/network/main.tf
+    statement: Nodes and load balancers need outbound internet for image pulls and AWS APIs; the sandbox has no NAT/egress proxy.
+  - id: AWS-0164
+    paths:
+      - infra/terraform/modules/network/main.tf
+    statement: Public subnets intentionally assign public IPs to avoid NAT gateway cost in the sandbox.

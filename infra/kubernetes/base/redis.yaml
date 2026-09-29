@@ -13,9 +13,24 @@ spec:
       labels:
         app: redis
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: redis
           image: redis:7.4.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
           args: ["redis-server", "--appendonly", "yes"]
           ports:
             - containerPort: 6379
@@ -29,6 +44,9 @@ spec:
               command: ["sh", "-c", "redis-cli ping"]
             initialDelaySeconds: 20
             periodSeconds: 20
+      volumes:
+        - name: data
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

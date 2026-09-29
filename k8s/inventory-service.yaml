@@ -13,9 +13,24 @@ spec:
       labels:
         app: inventory-service
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: inventory-service
           image: docker.io/munna897/pharmacy-inventory-service:local
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8085
@@ -48,6 +63,9 @@ spec:
               port: 8085
             initialDelaySeconds: 30
             periodSeconds: 15
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

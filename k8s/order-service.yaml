@@ -13,9 +13,24 @@ spec:
       labels:
         app: order-service
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: order-service
           image: docker.io/munna897/pharmacy-order-service:local-20260917-2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           imagePullPolicy: Always
           ports:
             - containerPort: 8087
@@ -48,6 +63,9 @@ spec:
               port: 8087
             initialDelaySeconds: 30
             periodSeconds: 15
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

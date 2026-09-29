@@ -18,6 +18,13 @@ spec:
       labels:
         app: auth-service
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: auth-service
       initContainers:
         # Fetches DB credentials + JWT RSA keypair from Secrets Manager using
@@ -25,6 +32,14 @@ spec:
         # writes them to an emptyDir volume the main container reads at boot.
         - name: fetch-secrets
           image: amazon/aws-cli:2.17.0
+          env:
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -44,11 +59,18 @@ spec:
               open("/secrets/public_key.pem", "w").write(jwt["public_key_pem"])
               PYEOF
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: secrets
               mountPath: /secrets
       containers:
         - name: auth-service
           image: __AUTH_SERVICE_IMAGE__
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           # Wrapper reads the password fetched by the init container into an
           # env var (Kubernetes has no native "env from file" mechanism),
           # then execs the image's normal entrypoint.
@@ -79,6 +101,8 @@ spec:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://pharmacy-observability-opentelemetry-collector:4318/v1/traces"
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: secrets
               mountPath: /secrets
               readOnly: true
@@ -104,6 +128,8 @@ spec:
               cpu: 500m
               memory: 512Mi
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: secrets
           emptyDir: {}
 ---

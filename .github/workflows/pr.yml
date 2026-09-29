@@ -58,6 +58,7 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: false
           skip-dirs: services/auth-service/src/test/resources/keys
+          trivyignores: .trivyignore.yaml
           exit-code: '1'
 
   changes:
