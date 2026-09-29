@@ -22,7 +22,7 @@ class PaymentGatewayClientIT {
     
     @RegisterExtension
     static WireMockExtension wm = WireMockExtension.newInstance()
-        .options(wireMockConfig().port(8082))
+        .options(wireMockConfig().dynamicPort())
         .build();
     
     private PaymentGatewayClient paymentGatewayClient;
@@ -30,18 +30,17 @@ class PaymentGatewayClientIT {
     
     @BeforeEach
     void setUp() {
-        restTemplate = new RestTemplateBuilder()
-            .build();
+        restTemplate = new RestTemplateConfig().restTemplate(new RestTemplateBuilder());
         paymentGatewayClient = new PaymentGatewayClient(
             restTemplate,
-            "http://localhost:8082",
+            wm.baseUrl(),
             new ObjectMapper()
         );
     }
     
     @Test
     void shouldSuccessfullyProcessPayment() {
-        wm.stubFor(post(urlEqualTo("/api/v1/process-payment"))
+        wm.stubFor(post(urlEqualTo("/api/v1/mock/process-payment"))
             .willReturn(aResponse()
                 .withHeader("Content-Type", "application/json")
                 .withBody("{\"success\":true,\"transactionId\":\"TXN-12345\",\"message\":\"Success\"}")
@@ -61,7 +60,7 @@ class PaymentGatewayClientIT {
     
     @Test
     void shouldHandleGatewayFailure() {
-        wm.stubFor(post(urlEqualTo("/api/v1/process-payment"))
+        wm.stubFor(post(urlEqualTo("/api/v1/mock/process-payment"))
             .willReturn(aResponse()
                 .withHeader("Content-Type", "application/json")
                 .withBody("{\"success\":false,\"transactionId\":null,\"message\":\"Card declined\"}")
@@ -80,7 +79,7 @@ class PaymentGatewayClientIT {
     
     @Test
     void shouldHandleGatewayConnectionError() {
-        wm.stubFor(post(urlEqualTo("/api/v1/process-payment"))
+        wm.stubFor(post(urlEqualTo("/api/v1/mock/process-payment"))
             .willReturn(aResponse()
                 .withStatus(500)
                 .withBody("Internal Server Error")));
@@ -95,7 +94,7 @@ class PaymentGatewayClientIT {
     
     @Test
     void shouldHandleGatewayTimeout() {
-        wm.stubFor(post(urlEqualTo("/api/v1/process-payment"))
+        wm.stubFor(post(urlEqualTo("/api/v1/mock/process-payment"))
             .willReturn(aResponse()
                 .withFixedDelay(10000)
                 .withStatus(200)));
@@ -110,7 +109,7 @@ class PaymentGatewayClientIT {
     
     @Test
     void shouldRetryableOnConnectionError() {
-        wm.stubFor(post(urlEqualTo("/api/v1/process-payment"))
+        wm.stubFor(post(urlEqualTo("/api/v1/mock/process-payment"))
             .willReturn(aResponse()
                 .withStatus(503)
                 .withBody("Service Unavailable")));
