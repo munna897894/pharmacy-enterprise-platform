@@ -6,7 +6,7 @@ COPY services services
 RUN mvn -q -pl services/auth-service -am dependency:go-offline
 RUN mvn -q -pl services/auth-service -am package -DskipTests
 
-FROM eclipse-temurin:21-jre-jammy AS runtime-base
+FROM eclipse-temurin:25-jre-jammy AS runtime-base
 WORKDIR /app
 RUN useradd -r -u 10001 appuser
 COPY --from=build /workspace/services/auth-service/target/auth-service-0.0.1-SNAPSHOT.jar app.jar
