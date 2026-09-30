@@ -1,265 +1,86 @@
 kube-prometheus-stack:
   grafana:
-    enabled: true
-    admin:
-      existingSecret: grafana-admin
-      userKey: admin-user
-      passwordKey: admin-password
     persistence:
-      enabled: true
-      storageClassName: gp3
-      size: 2Gi
-    service:
-      type: ClusterIP
-    sidecar:
-      dashboards:
-        enabled: true
-        label: grafana_dashboard
-        labelValue: "1"
-    additionalDataSources:
-      - name: Loki
-        uid: loki
-        type: loki
-        access: proxy
-        url: http://pharmacy-observability-loki:3100
-      - name: Tempo
-        uid: tempo
-        type: tempo
-        access: proxy
-        url: http://pharmacy-observability-tempo:3200
+      enabled: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+        ephemeral-storage: 1Gi
   prometheus:
     prometheusSpec:
-      replicas: 1
       retention: 3d
       retentionSize: 4GB
-      scrapeInterval: 30s
-      evaluationInterval: 30s
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+          ephemeral-storage: 1Gi
+        limits:
+          cpu: 1
+          memory: 1Gi
+          ephemeral-storage: 5Gi
       storageSpec:
-        volumeClaimTemplate:
-          spec:
-            storageClassName: gp3
-            accessModes: ["ReadWriteOnce"]
-            resources:
-              requests:
-                storage: 8Gi
-      additionalScrapeConfigs:
-        - job_name: pharmacy-platform
-          kubernetes_sd_configs:
-            - role: endpoints
-          relabel_configs:
-            - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
-              action: keep
-              regex: "true"
-            - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
-              action: replace
-              target_label: __metrics_path__
-              regex: (.+)
-            - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
-              action: replace
-              target_label: __address__
-              regex: "([^:]+)(?::\\d+)?;(\\d+)"
-              replacement: "$1:$2"
-            - source_labels: [__meta_kubernetes_namespace]
-              action: replace
-              target_label: namespace
-            - source_labels: [__meta_kubernetes_service_name]
-              action: replace
-              target_label: service
-            - source_labels: [__meta_kubernetes_pod_name]
-              action: replace
-              target_label: pod
-      additionalPrometheusRulesMap:
-        pharmacy-observability:
-          groups:
-            - name: pharmacy-platform
-              rules:
-                - alert: PharmacyServiceDown
-                  expr: up{job="pharmacy-platform"} == 0
-                  for: 2m
-                  labels:
-                    severity: critical
-                  annotations:
-                    summary: "A pharmacy service cannot be scraped"
-                - alert: PharmacyHighHttp5xxRate
-                  expr: |
-                    sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
-                    / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.001) > 0.05
-                  for: 5m
-                  labels:
-                    severity: warning
-                  annotations:
-                    summary: "HTTP 5xx ratio exceeds 5%"
-                - alert: PharmacyHighHttpP95Latency
-                  expr: |
-                    histogram_quantile(0.95,
-                      sum by (le, service, uri) (rate(http_server_requests_seconds_bucket[5m]))
-                    ) > 1
-                  for: 5m
-                  labels:
-                    severity: warning
-                  annotations:
-                    summary: "HTTP p95 latency exceeds one second"
-                - alert: PharmacyHikariPendingConnections
-                  expr: max by (service) (hikaricp_connections_pending) > 0
-                  for: 2m
-                  labels:
-                    severity: warning
-                  annotations:
-                    summary: "Hikari pool has pending connection requests"
-                - alert: PharmacyKafkaConsumerLagHigh
-                  expr: max by (consumergroup, topic) (kafka_consumergroup_lag) > 100
-                  for: 5m
-                  labels:
-                    severity: warning
-                  annotations:
-                    summary: "Kafka consumer lag exceeds 100 records"
-                - alert: PharmacyDeadLetterTopicActive
-                  expr: sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".*\\.dlt"}[5m])) > 0
-                  for: 1m
-                  labels:
-                    severity: warning
-                  annotations:
-                    summary: "A dead-letter topic received records in the last five minutes"
-                - alert: PharmacyOutboxOldEvent
-                  expr: max by (service) (pharmacy_outbox_oldest_unpublished_seconds) > 300
-                  for: 2m
-                  labels:
-                    severity: warning
-                  annotations:
-                    summary: "Oldest unpublished outbox event is older than five minutes"
-                - alert: PharmacyJvmHeapHigh
-                  expr: |
-                    max by (service) (
-                      jvm_memory_used_bytes{area="heap"}
-                      / jvm_memory_max_bytes{area="heap"}
-                    ) > 0.85
-                  for: 5m
-                  labels:
-                    severity: warning
-                  annotations:
-                    summary: "JVM heap usage exceeds 85%"
-                - alert: PharmacyContainerRestarts
-                  expr: increase(kube_pod_container_status_restarts_total[15m]) > 2
-                  for: 2m
-                  labels:
-                    severity: warning
-                  annotations:
-                    summary: "A Kubernetes container restarted more than twice in 15 minutes"
+        emptyDir:
+          sizeLimit: 5Gi
 
 loki:
-  deploymentMode: SingleBinary
   loki:
-    auth_enabled: false
-    commonConfig:
-      replication_factor: 1
-    storage:
-      type: filesystem
     limits_config:
-      allow_structured_metadata: true
       retention_period: 168h
-    compactor:
-      retention_enabled: true
   singleBinary:
-    replicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+        ephemeral-storage: 1Gi
+      limits:
+        cpu: 1
+        memory: 1536Mi
+        ephemeral-storage: 5Gi
     persistence:
-      enabled: true
-      storageClass: gp3
-      size: 8Gi
-  read:
-    replicas: 0
-  write:
-    replicas: 0
-  backend:
-    replicas: 0
+      enabled: false
 
 tempo:
   tempo:
-    reportingEnabled: false
-    metricsGenerator:
-      enabled: false
-    storage:
-      trace:
-        backend: local
-        local:
-          path: /var/tempo/traces
+    retention: 72h
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+        ephemeral-storage: 1Gi
+      limits:
+        cpu: 1
+        memory: 1Gi
+        ephemeral-storage: 4Gi
   persistence:
-    enabled: true
-    storageClassName: gp3
-    size: 8Gi
-  service:
-    type: ClusterIP
+    enabled: false
 
 opentelemetry-collector:
-  mode: deployment
-  replicaCount: 1
-  image:
-    repository: otel/opentelemetry-collector-contrib
-    tag: 0.110.0
-  service:
-    type: ClusterIP
-  ports:
-    otlp:
-      enabled: true
-      containerPort: 4317
-      servicePort: 4317
-      protocol: TCP
-    otlp-http:
-      enabled: true
-      containerPort: 4318
-      servicePort: 4318
-      protocol: TCP
-  config:
-    receivers:
-      otlp:
-        protocols:
-          grpc:
-            endpoint: 0.0.0.0:4317
-          http:
-            endpoint: 0.0.0.0:4318
-    processors:
-      memory_limiter:
-        check_interval: 1s
-        limit_mib: 512
-      batch:
-        timeout: 5s
-    exporters:
-      otlp/tempo:
-        endpoint: pharmacy-observability-tempo:4317
-        tls:
-          insecure: true
-      prometheus:
-        endpoint: 0.0.0.0:8889
-        namespace: pharmacy_otel
-    service:
-      pipelines:
-        traces:
-          receivers: [otlp]
-          processors: [memory_limiter, batch]
-          exporters: [otlp/tempo]
-        metrics:
-          receivers: [otlp]
-          processors: [memory_limiter, batch]
-          exporters: [prometheus]
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 alloy:
-  controller:
-    type: daemonset
-  rbac:
-    create: true
+  clusterName: pharmacy-eks
   alloy:
-    configMap:
-      content: |
-        discovery.kubernetes "pods" {
-          role = "pod"
-        }
+    resources:
+      requests:
+        cpu: 50m
+        memory: 96Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
 
-        loki.source.kubernetes "pods" {
-          targets    = discovery.kubernetes.pods.targets
-          forward_to = [loki.write.local.receiver]
-        }
-
-        loki.write "local" {
-          endpoint {
-            url = "http://pharmacy-observability-loki:3100/loki/api/v1/push"
-          }
-        }
+kafkaExporter:
+  enabled: true
+  kafkaServer: kafka.pharmacy.svc.cluster.local:9092
+  namespace: pharmacy

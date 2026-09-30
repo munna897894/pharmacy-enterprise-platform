@@ -1,0 +1,31 @@
+# Dynamic block storage for the sandbox.
+#
+# EKS pre-creates a legacy "gp2" StorageClass that is marked default but is
+# backed by the in-tree kubernetes.io/aws-ebs provisioner, which Kubernetes
+# removed in 1.31. On this cluster that class cannot provision anything: a PVC
+# using it stays Pending with no events explaining why. scripts/aws-apply.sh
+# clears its default annotation so nothing silently selects it.
+#
+# This gp3 class is the working default, served by the aws-ebs-csi-driver addon
+# (see infra/terraform/modules/eks/main.tf).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  # gp3 includes 3000 IOPS and 125 MiB/s at no extra charge; requesting more
+  # is billed separately, so the sandbox stays on the free baseline.
+  iops: "3000"
+  throughput: "125"
+  encrypted: "true"
+# Delete, not Retain: a retained volume outlives `terraform destroy` and keeps
+# billing with nothing left to reference it. Teardown correctness matters more
+# than data preservation in a disposable environment.
+reclaimPolicy: Delete
+# The volume must be created in the same AZ as the pod that mounts it.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

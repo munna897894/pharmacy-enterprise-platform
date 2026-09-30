@@ -1,0 +1,150 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-bootstrap
+  namespace: pharmacy
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: database-bootstrap
+    spec:
+      restartPolicy: Never
+      serviceAccountName: db-bootstrap
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-databases
+          image: amazon/aws-cli:2.17.0
+          env:
+            - name: HOME
+              value: /tmp
+            - name: AWS_REGION
+              value: __AWS_REGION__
+            - name: MASTER_SECRET_ARN
+              value: __RDS_MASTER_SECRET_ARN__
+            - name: MASTER_USERNAME
+              value: __RDS_MASTER_USERNAME__
+            - name: AUTH_DB_SECRET_ARN
+              value: __AUTH_DB_SECRET_ARN__
+            - name: PRODUCT_DB_SECRET_ARN
+              value: __PRODUCT_DB_SECRET_ARN__
+            - name: CUSTOMER_DB_SECRET_ARN
+              value: __CUSTOMER_DB_SECRET_ARN__
+            - name: PHARMACY_DB_SECRET_ARN
+              value: __PHARMACY_DB_SECRET_ARN__
+            - name: INVENTORY_DB_SECRET_ARN
+              value: __INVENTORY_DB_SECRET_ARN__
+            - name: PRESCRIPTION_DB_SECRET_ARN
+              value: __PRESCRIPTION_DB_SECRET_ARN__
+            - name: ORDER_DB_SECRET_ARN
+              value: __ORDER_DB_SECRET_ARN__
+            - name: PAYMENT_DB_SECRET_ARN
+              value: __PAYMENT_DB_SECRET_ARN__
+            - name: NOTIFICATION_DB_SECRET_ARN
+              value: __NOTIFICATION_DB_SECRET_ARN__
+            - name: AUDIT_DB_SECRET_ARN
+              value: __AUDIT_DB_SECRET_ARN__
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              # RDS owns this secret (manage_master_user_password), so its value is
+              # a JSON document rather than a bare string. RDS never generates
+              # '"' or '\\' in master passwords, so extracting the field with sed is
+              # safe; anything unexpected fails closed below rather than producing
+              # a confusing authentication error later.
+              master_password=$(aws secretsmanager get-secret-value --region "$AWS_REGION" \
+                --secret-id "$MASTER_SECRET_ARN" --query SecretString --output text \
+                | sed -n 's/.*"password":"\([^"]*\)".*/\1/p')
+              if [ -z "$master_password" ]; then
+                echo "Could not read the RDS master credential." >&2
+                exit 1
+              fi
+              # RDS-generated passwords may contain '#', spaces and other
+              # characters that change how an unquoted option-file value parses,
+              # so the value is written quoted with backslashes and quotes
+              # escaped. Writing it bare would break authentication in ways that
+              # look like a wrong password.
+              escaped_password=$(printf '%s' "$master_password" | sed 's/\\/\\\\/g; s/"/\\"/g')
+              printf '[client]\nuser=%s\npassword="%s"\n' "$MASTER_USERNAME" "$escaped_password" > /bootstrap/my.cnf
+              unset master_password escaped_password
+              : > /bootstrap/schema-users.sql
+              write_database() {
+                secret_arn="$1"
+                schema="$2"
+                username="$3"
+                password=$(aws secretsmanager get-secret-value --region "$AWS_REGION" \
+                  --secret-id "$secret_arn" --query SecretString --output text)
+                case "$password" in
+                  ""|*[!a-zA-Z0-9]*) echo "Invalid generated database credential." >&2; exit 1 ;;
+                esac
+                printf "CREATE DATABASE IF NOT EXISTS \`%s\` CHARACTER SET utf8mb4;\n" "$schema" >> /bootstrap/schema-users.sql
+                printf "CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s';\n" "$username" "$password" >> /bootstrap/schema-users.sql
+                printf "ALTER USER '%s'@'%%' IDENTIFIED BY '%s';\n" "$username" "$password" >> /bootstrap/schema-users.sql
+                printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'%%';\n" "$schema" "$username" >> /bootstrap/schema-users.sql
+                unset password
+              }
+              write_database "$AUTH_DB_SECRET_ARN" auth_service auth_user
+              write_database "$PRODUCT_DB_SECRET_ARN" pharmacy_product product_user
+              write_database "$CUSTOMER_DB_SECRET_ARN" pharmacy_customer customer_user
+              write_database "$PHARMACY_DB_SECRET_ARN" pharmacy_pharmacy pharmacy_user
+              write_database "$INVENTORY_DB_SECRET_ARN" pharmacy_inventory inventory_user
+              write_database "$PRESCRIPTION_DB_SECRET_ARN" prescription_service prescription_user
+              write_database "$ORDER_DB_SECRET_ARN" pharmacy_order order_user
+              write_database "$PAYMENT_DB_SECRET_ARN" pharmacy_payment payment_user
+              write_database "$NOTIFICATION_DB_SECRET_ARN" pharmacy_notification notification_user
+              write_database "$AUDIT_DB_SECRET_ARN" pharmacy_audit audit_user
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: work
+              mountPath: /bootstrap
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: mysql-client
+          image: mysql:8.4
+          env:
+            - name: HOME
+              value: /tmp
+            - name: MYSQL_HISTFILE
+              value: /dev/null
+          command: ["/bin/sh", "-c"]
+          args:
+            - mysql --defaults-extra-file=/bootstrap/my.cnf --host=__RDS_ENDPOINT__ --port=3306 < /bootstrap/schema-users.sql
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: work
+              mountPath: /bootstrap
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+        - name: tmp
+          emptyDir: {}

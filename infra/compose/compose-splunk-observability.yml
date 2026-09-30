@@ -1,0 +1,84 @@
+services:
+  # The normal local profile favors readable console text. This opt-in override
+  # switches only the approved Splunk test run to each service's existing
+  # non-local structured JSON logging configuration.
+  auth-service:
+    environment: &commercial-logging
+      SPRING_PROFILES_ACTIVE: commercial
+      ENVIRONMENT: local-commercial
+  product-service:
+    environment: *commercial-logging
+  customer-service:
+    environment: *commercial-logging
+  pharmacy-service:
+    environment: *commercial-logging
+  inventory-service:
+    environment: *commercial-logging
+  prescription-service:
+    environment: *commercial-logging
+  order-service:
+    environment: *commercial-logging
+  external-mock-service:
+    environment: *commercial-logging
+  payment-service:
+    environment: *commercial-logging
+  notification-service:
+    environment: *commercial-logging
+  audit-service:
+    environment: *commercial-logging
+  api-gateway:
+    environment: *commercial-logging
+
+  # These services are additionally gated by an explicit profile. They are
+  # never created by the normal application/observability commands.
+  # Starting Splunk 10.x is an affirmative acceptance of its license/general
+  # terms and must only happen during an approved test.
+  splunk:
+    profiles: ["splunk"]
+    image: splunk/splunk:10.4.3
+    environment:
+      SPLUNK_START_ARGS: --accept-license
+      SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
+      SPLUNK_PASSWORD: ${SPLUNK_ADMIN_PASSWORD:?Set only for a temporary local Splunk test}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:?Set only for a temporary local Splunk test}
+    ports:
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8188:8088"
+    volumes:
+      - splunk-data:/opt/splunk/var
+      - splunk-etc:/opt/splunk/etc
+    healthcheck:
+      test: ["CMD-SHELL", "curl -ksf https://localhost:8088/services/collector/health >/dev/null"]
+      start_period: 120s
+      interval: 15s
+      timeout: 5s
+      retries: 40
+
+  alloy-splunk:
+    profiles: ["splunk"]
+    image: grafana/alloy:v1.20.0
+    command:
+      - run
+      - --feature.community-components.enabled
+      - --server.http.listen-addr=127.0.0.1:12345
+      - /etc/alloy/config.alloy
+    environment:
+      SPLUNK_HEC_ENDPOINT: ${SPLUNK_HEC_ENDPOINT:-https://splunk:8088}
+      SPLUNK_INDEX: ${SPLUNK_INDEX:-pharmacy_nonprod}
+      SPLUNK_SOURCETYPE: ${SPLUNK_SOURCETYPE:-pharmacy:service:json}
+    volumes:
+      - ./otel-collector-splunk-local.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    secrets:
+      - splunk_hec_token
+    depends_on:
+      splunk:
+        condition: service_healthy
+
+secrets:
+  splunk_hec_token:
+    file: ${SPLUNK_HEC_TOKEN_FILE:-../../.local/secrets/splunk-hec-token}
+
+volumes:
+  splunk-data:
+  splunk-etc:

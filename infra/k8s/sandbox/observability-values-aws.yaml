@@ -1,0 +1,108 @@
+# AWS sandbox overlay for infra/helm/observability, layered AFTER the chart's
+# values-eks.yaml by scripts/aws-apply.sh:
+#   helm upgrade --install pharmacy-observability infra/helm/observability \
+#     -f infra/helm/observability/values-eks.yaml \
+#     -f infra/k8s/sandbox/observability-values-aws.yaml
+#
+# Purpose: fit the full 12-workload fleet AND observability on two t4g.large
+# workers (~14 GiB allocatable in total). values-eks leaves eight containers
+# unbounded and enables components a two-node throwaway cluster does not need,
+# so this overlay (checked by scripts/aws-validate.sh):
+#   - disables Alertmanager (nobody receives notifications in the sandbox;
+#     rules still evaluate and show under Prometheus -> Alerts), node-exporter
+#     and control-plane scrapers EKS does not expose;
+#   - bounds every remaining container's memory/CPU;
+#   - shrinks node-local ephemeral storage so 30 GiB node disks keep headroom
+#     for twelve JVM images, Kafka and kubelet eviction thresholds.
+# Everything stays ClusterIP; access is kubectl port-forward only.
+kube-prometheus-stack:
+  defaultRules:
+    rules:
+      alertmanager: false
+      etcd: false
+      kubeControllerManager: false
+      kubeProxy: false
+      kubeSchedulerAlerting: false
+      kubeSchedulerRecording: false
+      node: false
+      nodeExporterAlerting: false
+      nodeExporterRecording: false
+  alertmanager:
+    enabled: false
+  nodeExporter:
+    enabled: false
+  kubeControllerManager:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+  kubeProxy:
+    enabled: false
+  prometheusOperator:
+    resources:
+      requests: {cpu: 25m, memory: 64Mi}
+      limits: {cpu: 200m, memory: 192Mi}
+    admissionWebhooks:
+      patch:
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {cpu: 100m, memory: 64Mi}
+  kube-state-metrics:
+    resources:
+      requests: {cpu: 10m, memory: 48Mi}
+      limits: {cpu: 100m, memory: 128Mi}
+  grafana:
+    resources:
+      requests: {cpu: 25m, memory: 96Mi, ephemeral-storage: 64Mi}
+      limits: {cpu: 200m, memory: 320Mi, ephemeral-storage: 512Mi}
+    sidecar:
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {cpu: 100m, memory: 96Mi}
+  prometheus:
+    prometheusSpec:
+      retention: 2d
+      retentionSize: 1500MB
+      resources:
+        requests: {cpu: 100m, memory: 384Mi, ephemeral-storage: 512Mi}
+        limits: {cpu: 500m, memory: 768Mi, ephemeral-storage: 2Gi}
+      storageSpec:
+        emptyDir:
+          sizeLimit: 2Gi
+
+loki:
+  loki:
+    limits_config:
+      retention_period: 48h
+  singleBinary:
+    resources:
+      requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 512Mi}
+      limits: {cpu: 500m, memory: 768Mi, ephemeral-storage: 2Gi}
+  sidecar:
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 96Mi}
+
+tempo:
+  tempo:
+    retention: 48h
+    resources:
+      requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 512Mi}
+      limits: {cpu: 500m, memory: 640Mi, ephemeral-storage: 2Gi}
+
+opentelemetry-collector:
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 300m, memory: 320Mi}
+
+alloy:
+  clusterName: pharmacy-sbx
+  alloy:
+    resources:
+      requests: {cpu: 25m, memory: 96Mi}
+      limits: {cpu: 200m, memory: 256Mi}
+  configReloader:
+    resources:
+      requests: {cpu: 1m, memory: 8Mi}
+      limits: {cpu: 50m, memory: 32Mi}

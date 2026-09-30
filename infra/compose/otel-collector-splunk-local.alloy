@@ -1,0 +1,85 @@
+// Local-only Splunk exporter. The generated Splunk certificate is not trusted;
+// the Kubernetes/Cloud overlay keeps TLS verification enabled.
+local.file "splunk_hec_token" {
+  filename  = "/run/secrets/splunk_hec_token"
+  is_secret = true
+}
+
+discovery.docker "local" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "pharmacy_services" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "(api-gateway|auth-service|product-service|customer-service|pharmacy-service|inventory-service|prescription-service|order-service|payment-service|notification-service|audit-service|external-mock-service)"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "pharmacy" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.local.targets
+  labels        = { environment = "local-commercial" }
+  relabel_rules = discovery.relabel.pharmacy_services.rules
+  forward_to    = [otelcol.receiver.loki.splunk.receiver]
+}
+
+otelcol.receiver.loki "splunk" {
+  output {
+    logs = [otelcol.processor.batch.splunk.input]
+  }
+}
+
+otelcol.processor.batch "splunk" {
+  timeout         = "5s"
+  send_batch_size = 512
+
+  output {
+    logs = [otelcol.exporter.splunkhec.logs.input]
+  }
+}
+
+otelcol.exporter.splunkhec "logs" {
+  splunk {
+    token                = local.file.splunk_hec_token.content
+    index                = sys.env("SPLUNK_INDEX")
+    source               = "pharmacy-platform"
+    sourcetype           = sys.env("SPLUNK_SOURCETYPE")
+    log_data_enabled     = true
+    profiling_data_enabled = false
+  }
+
+  client {
+    endpoint             = sys.env("SPLUNK_HEC_ENDPOINT")
+    // The temporary local Splunk container uses its generated certificate.
+    // Cloud/EKS configuration must verify TLS and does not use this file.
+    insecure_skip_verify = true
+  }
+
+  retry_on_failure {
+    enabled          = true
+    initial_interval = "1s"
+    max_interval     = "30s"
+    max_elapsed_time = "10m"
+  }
+
+  sending_queue {
+    enabled       = true
+    queue_size    = 1024
+    num_consumers = 2
+  }
+}

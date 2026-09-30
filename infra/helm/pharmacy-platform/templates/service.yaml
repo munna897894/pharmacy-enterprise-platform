@@ -3,13 +3,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ $name }}
-  namespace: {{ $.Values.namespace | default "pharmacy" }}
-  annotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/path: /actuator/prometheus
-    prometheus.io/port: "{{ $svc.managementPort | default $svc.port }}"
+  namespace: {{ $.Values.namespace }}
 spec:
-  replicas: 1
+  replicas: {{ $svc.replicas | default 1 }}
   selector:
     matchLabels:
       app: {{ $name }}
@@ -17,30 +13,122 @@ spec:
     metadata:
       labels:
         app: {{ $name }}
+      annotations:
+        checksum/config: {{ toJson $.Values.commonConfig | sha256sum | quote }}
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: {{ $svc.managementPort | default $svc.port | quote }}
     spec:
+      automountServiceAccountToken: {{ $svc.automountServiceAccountToken | default false }}
+      {{- with $svc.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: {{ $name }}
-          image: {{ $svc.image }}
+          image: {{ required (printf "image required for %s" $name) $svc.image | quote }}
+          imagePullPolicy: {{ $.Values.imagePullPolicy | default "IfNotPresent" }}
           ports:
-            - containerPort: {{ $svc.port }}
-            {{- if $svc.managementPort }}
-            - containerPort: {{ $svc.managementPort }}
-              name: management
+            - name: http
+              containerPort: {{ $svc.port }}
+            {{- with $svc.managementPort }}
+            - name: management
+              containerPort: {{ . }}
             {{- end }}
           envFrom:
             - configMapRef:
                 name: pharmacy-common
+          {{- if or $svc.db $svc.env $svc.authKeys }}
+          env:
+            {{- with $svc.db }}
+            - name: DB_NAME
+              value: {{ .name | quote }}
+            - name: DB_USER
+              value: {{ .user | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName | default "pharmacy-secrets" }}
+                  key: {{ .passwordKey }}
+            {{- end }}
+            {{- range $key, $value := $svc.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: {{ $svc.managementPort | default $svc.port }}
+            periodSeconds: 10
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: {{ $svc.managementPort | default $svc.port }}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: {{ $svc.managementPort | default $svc.port }}
+            periodSeconds: 15
+          resources:
+            {{- toYaml ($svc.resources | default $.Values.defaultResources) | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $svc.authKeys }}
+            - name: jwt-keys
+              mountPath: /etc/auth
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $svc.authKeys }}
+        - name: jwt-keys
+          secret:
+            secretName: {{ $svc.authKeys }}
+            defaultMode: 0440
+            items:
+              - key: private_key.pem
+                path: private_key.pem
+              - key: public_key.pem
+                path: public_key.pem
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ $name }}
-  namespace: {{ $.Values.namespace | default "pharmacy" }}
+  namespace: {{ $.Values.namespace }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /actuator/prometheus
+    prometheus.io/port: {{ $svc.managementPort | default $svc.port | quote }}
 spec:
+  type: ClusterIP
   selector:
     app: {{ $name }}
   ports:
-    - port: {{ $svc.port }}
-      targetPort: {{ $svc.port }}
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+    {{- with $svc.managementPort }}
+    - name: management
+      port: {{ . }}
+      targetPort: management
+    {{- end }}
 ---
 {{- end }}

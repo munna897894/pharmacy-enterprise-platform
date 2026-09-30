@@ -1,5 +1,9 @@
 # Prompt 03 Implementation Summary: API Gateway Service
 
+> **Historical snapshot — scope:** initial Prompt 03 gateway implementation summary. The original creation date is not preserved; this file was first committed/imported on 2026-09-28. Its feature/test counts and configuration details are not current. See the [gateway service guide](services/api-gateway/README.md), [architecture](docs/02-architecture.md), [API contracts](docs/06-api-contracts.md), and [observability guide](docs/11-observability.md) for current facts.
+
+## Preserved historical content
+
 ## Overview
 Successfully implemented a production-grade API Gateway service for the pharmacy-enterprise-platform as the single entry point for all external HTTP traffic. The gateway handles JWT validation, rate limiting, correlation ID propagation, security headers, and intelligent request routing to 10 backend microservices.
 

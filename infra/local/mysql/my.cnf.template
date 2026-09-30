@@ -1,0 +1,27 @@
+# Project-scoped MySQL 8.4 for local Kubernetes testing. Rendered by
+# scripts/local-mysql.py into .local/mysql/my.cnf; never contains credentials.
+[mysqld]
+datadir=@DATA_DIR@
+socket=@RUN_DIR@/mysqld.sock
+pid-file=@RUN_DIR@/mysqld.pid
+log-error=@LOG_DIR@/mysqld.err
+tmpdir=@TMP_DIR@
+port=@PORT@
+bind-address=@BIND_ADDRESS@
+mysqlx=OFF
+skip-name-resolve=ON
+disable-log-bin
+general-log=OFF
+slow-query-log=OFF
+local-infile=OFF
+secure-file-priv=@TMP_DIR@
+character-set-server=utf8mb4
+collation-server=utf8mb4_0900_ai_ci
+default-time-zone=+00:00
+max-connections=200
+innodb-buffer-pool-size=256M
+innodb-redo-log-capacity=128M
+performance-schema=OFF
+
+[client]
+socket=@RUN_DIR@/mysqld.sock

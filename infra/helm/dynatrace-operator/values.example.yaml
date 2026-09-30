@@ -1,0 +1,9 @@
+# Dynatrace Operator 1.10.2 (OCI chart).
+# This file is inert until explicitly supplied to a Helm install.
+installCRD: true
+
+csidriver:
+  enabled: true
+
+webhook:
+  highAvailability: false

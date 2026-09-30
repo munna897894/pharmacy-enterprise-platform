@@ -1,5 +1,7 @@
 # Prompt 05 — Order and payment workflow (current state)
 
+> **Status (2026-09-30): Complete.** Current event and API contracts are in [API contracts](../docs/06-api-contracts.md) and [event contracts](../docs/07-event-contracts.md).
+
 This prompt matches the repository’s order and payment implementation and the workflow logic that is now running in the service fleet.
 
 ## Status
@@ -54,4 +56,3 @@ The order/payment path is part of the broader event-driven workflow and is align
 - generated totals and state transitions are deterministic
 - duplicated requests remain safe and consistent
 - failures and invalid transitions are rejected without creating hidden side effects
-

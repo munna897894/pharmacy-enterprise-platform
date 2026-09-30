@@ -1,67 +1,154 @@
 #!/usr/bin/env bash
-# Mandatory post-destroy leftover-resource inventory check, per the hard
-# safety rule: "Check EKS, EC2, ELB, RDS, NAT, EIP and ECR resources after
-# destroy." Also mirrors the exact command block committed in
-# docs/aws-plan-review.md section 10 — keep both in sync if edited.
 set -euo pipefail
 
-: "${AWS_PROFILE:=pharmacy-sandbox}"
-: "${AWS_REGION:=us-east-1}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/aws-common.sh"
+aws_sandbox_guard
 
-export AWS_PROFILE AWS_REGION
+LEFTOVERS=0
+check_empty() {
+  local label="$1"
+  local result="$2"
+  if [[ -n "$result" && "$result" != "None" ]]; then
+    printf 'LEFTOVER %s:\n%s\n' "$label" "$result"
+    LEFTOVERS=1
+  else
+    printf 'No sandbox %s remain.\n' "$label"
+  fi
+}
 
-echo "--- Caller identity (confirm this is the sandbox account) ---"
-aws sts get-caller-identity
+echo "== Checking target resources in the verified sandbox account =="
+CLUSTERS=$(aws eks list-clusters --region "$AWS_REGION" --output json \
+  | python3 -c "import json,sys; print('\\n'.join(x for x in json.load(sys.stdin)['clusters'] if x == '${NAME_PREFIX}'))")
+check_empty EKS-cluster "$CLUSTERS"
 
-echo
-echo "--- EKS clusters ---"
-aws eks list-clusters --region "$AWS_REGION"
-
-echo
-echo "--- EC2 instances (non-terminated) ---"
-aws ec2 describe-instances --region "$AWS_REGION" \
+INSTANCES=$(aws ec2 describe-instances --region "$AWS_REGION" \
   --filters "Name=instance-state-name,Values=pending,running,stopping,stopped" \
-  --query 'Reservations[].Instances[].[InstanceId,State.Name,Tags]'
+  --output json | python3 -c "
+import json,sys
+prefix='${NAME_PREFIX}'
+matches=[]
+for reservation in json.load(sys.stdin)['Reservations']:
+  for instance in reservation['Instances']:
+    tags={item['Key']:item['Value'] for item in instance.get('Tags', [])}
+    if tags.get('eks:cluster-name') == prefix or tags.get('kubernetes.io/cluster/'+prefix) in ('owned','shared') or tags.get('Name','').startswith(prefix):
+      matches.append(instance['InstanceId'])
+print('\\n'.join(matches))
+")
+check_empty EKS-worker-instances "$INSTANCES"
 
-echo
-echo "--- Load balancers (ALB/ELB) ---"
-aws elbv2 describe-load-balancers --region "$AWS_REGION" \
-  --query 'LoadBalancers[].[LoadBalancerArn,DNSName]'
+DBS=$(aws rds describe-db-instances --region "$AWS_REGION" \
+  --query "DBInstances[?DBInstanceIdentifier=='${NAME_PREFIX}-mysql'].DBInstanceIdentifier" \
+  --output text)
+check_empty RDS-instance "$DBS"
 
-echo
-echo "--- RDS instances ---"
-aws rds describe-db-instances --region "$AWS_REGION" \
-  --query 'DBInstances[].[DBInstanceIdentifier,DBInstanceStatus]'
+SNAPSHOTS=$(aws rds describe-db-snapshots --region "$AWS_REGION" --output json \
+  | python3 -c "import json,sys; n='${NAME_PREFIX}-mysql'; print('\\n'.join(x['DBSnapshotIdentifier'] for x in json.load(sys.stdin)['DBSnapshots'] if x.get('DBInstanceIdentifier') == n))")
+check_empty RDS-snapshot "$SNAPSHOTS"
 
-echo
-echo "--- NAT Gateways (should always be empty for this exercise) ---"
-aws ec2 describe-nat-gateways --region "$AWS_REGION" \
-  --filter "Name=state,Values=pending,available,deleting" \
-  --query 'NatGateways[].[NatGatewayId,State]'
+LOAD_BALANCERS=$(python3 - "$AWS_REGION" "$AWS_PROFILE" "$NAME_PREFIX" <<'PY'
+import json
+import subprocess
+import sys
 
-echo
-echo "--- Unattached Elastic IPs (classic leftover-cost trap) ---"
-aws ec2 describe-addresses --region "$AWS_REGION" --query 'Addresses[?AssociationId==`null`]'
+region, profile, prefix = sys.argv[1:]
+resources = json.loads(subprocess.check_output([
+    "aws", "elbv2", "describe-load-balancers", "--region", region,
+    "--profile", profile, "--output", "json",
+], text=True))["LoadBalancers"]
+arns = [item["LoadBalancerArn"] for item in resources]
+found = []
+for offset in range(0, len(arns), 20):
+    tagged = json.loads(subprocess.check_output([
+        "aws", "elbv2", "describe-tags", "--region", region, "--profile", profile,
+        "--resource-arns", *arns[offset:offset + 20], "--output", "json",
+    ], text=True))["TagDescriptions"]
+    for item in tagged:
+        tags = {tag["Key"]: tag["Value"] for tag in item["Tags"]}
+        if tags.get("elbv2.k8s.aws/cluster") == prefix:
+            found.append(item["ResourceArn"])
+print("\n".join(found))
+PY
+)
+check_empty gateway-load-balancer "$LOAD_BALANCERS"
 
-echo
-echo "--- ECR repositories (informational — low/no cost, not auto-deleted by terraform destroy of EKS/RDS) ---"
-aws ecr describe-repositories --region "$AWS_REGION" --query 'repositories[].repositoryName' || true
+TARGET_GROUPS=$(python3 - "$AWS_REGION" "$AWS_PROFILE" "$NAME_PREFIX" <<'PY'
+import json
+import subprocess
+import sys
 
-echo
-echo "--- Secrets Manager secrets (should be gone — recovery_window_in_days=0) ---"
-aws secretsmanager list-secrets --region "$AWS_REGION" --query 'SecretList[].Name'
+region, profile, prefix = sys.argv[1:]
+resources = json.loads(subprocess.check_output([
+    "aws", "elbv2", "describe-target-groups", "--region", region,
+    "--profile", profile, "--output", "json",
+], text=True))["TargetGroups"]
+arns = [item["TargetGroupArn"] for item in resources]
+found = []
+for offset in range(0, len(arns), 20):
+    tagged = json.loads(subprocess.check_output([
+        "aws", "elbv2", "describe-tags", "--region", region, "--profile", profile,
+        "--resource-arns", *arns[offset:offset + 20], "--output", "json",
+    ], text=True))["TagDescriptions"]
+    for item in tagged:
+        tags = {tag["Key"]: tag["Value"] for tag in item["Tags"]}
+        if tags.get("elbv2.k8s.aws/cluster") == prefix:
+            found.append(item["ResourceArn"])
+print("\n".join(found))
+PY
+)
+check_empty gateway-target-group "$TARGET_GROUPS"
 
-echo
-echo "--- Current budget spend ---"
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-aws budgets describe-budgets --account-id "$ACCOUNT_ID" \
-  --query 'Budgets[].[BudgetName,CalculatedSpend.ActualSpend]'
+NAT_GATEWAYS=$(aws ec2 describe-nat-gateways --region "$AWS_REGION" \
+  --filter "Name=tag:Name,Values=${NAME_PREFIX}-*" \
+           "Name=state,Values=pending,available,deleting" \
+  --query 'NatGateways[].NatGatewayId' --output text)
+check_empty NAT-gateway "$NAT_GATEWAYS"
 
-echo
-echo "=================================================================="
-echo "If EKS/EC2/ELB/RDS/NAT/EIP show ANY results above, they are LEFTOVER"
-echo "billable resources and must be manually investigated/deleted before"
-echo "this exercise is considered closed. ECR repos are expected to remain"
-echo "(low/no cost) unless you explicitly want to delete them too:"
-echo "  aws ecr delete-repository --repository-name <name> --force --region $AWS_REGION"
-echo "=================================================================="
+ADDRESSES=$(aws ec2 describe-addresses --region "$AWS_REGION" \
+  --filters "Name=tag:Name,Values=${NAME_PREFIX}-*" \
+  --query 'Addresses[].AllocationId' --output text)
+check_empty Elastic-IP "$ADDRESSES"
+
+# Dynamically provisioned EBS volumes are created by the CSI driver, not by
+# Terraform, so `terraform destroy` never sees them. If the cluster is torn down
+# before its PVCs are released the volumes survive, keep billing hourly, and
+# carry only Kubernetes tags that make them easy to overlook.
+CSI_VOLUMES=$(aws ec2 describe-volumes --region "$AWS_REGION" \
+  --filters "Name=tag-key,Values=kubernetes.io/created-for/pvc/name" \
+            "Name=status,Values=creating,available,in-use" \
+  --query "Volumes[?Tags[?Key=='kubernetes.io/cluster/${NAME_PREFIX}']].VolumeId" \
+  --output text)
+check_empty CSI-provisioned-EBS-volume "$CSI_VOLUMES"
+
+# Snapshots are not created by this environment, but a leftover one would keep
+# billing after every other trace of the cluster is gone.
+CSI_SNAPSHOTS=$(aws ec2 describe-snapshots --region "$AWS_REGION" --owner-ids self \
+  --filters "Name=tag-key,Values=CSIVolumeSnapshotName" \
+  --query 'Snapshots[].SnapshotId' --output text)
+check_empty CSI-EBS-snapshot "$CSI_SNAPSHOTS"
+
+VPCS=$(aws ec2 describe-vpcs --region "$AWS_REGION" \
+  --filters "Name=tag:Name,Values=${NAME_PREFIX}-vpc" \
+  --query 'Vpcs[].VpcId' --output text)
+check_empty sandbox-VPC "$VPCS"
+
+REPOSITORIES=$(aws ecr describe-repositories --region "$AWS_REGION" \
+  --query "repositories[?starts_with(repositoryName, '${NAME_PREFIX}-')].repositoryName" \
+  --output text)
+check_empty ECR-repository "$REPOSITORIES"
+
+SECRETS=$(aws secretsmanager list-secrets --region "$AWS_REGION" \
+  --query "SecretList[?starts_with(Name, '${NAME_PREFIX}/')].Name" --output text)
+check_empty Secrets-Manager-secret "$SECRETS"
+
+LOG_GROUPS=$(aws logs describe-log-groups --region "$AWS_REGION" \
+  --log-group-name-prefix "/aws/eks/${NAME_PREFIX}/cluster" \
+  --query "logGroups[?logGroupName=='/aws/eks/${NAME_PREFIX}/cluster'].logGroupName" --output text)
+check_empty EKS-control-plane-log-group "$LOG_GROUPS"
+
+if [[ "$LEFTOVERS" -ne 0 ]]; then
+  echo "Sandbox resources remain. Investigate and remove them before considering the session closed." >&2
+  exit 1
+fi
+
+echo "No targeted billable AWS resources remain."

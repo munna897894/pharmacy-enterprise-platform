@@ -51,10 +51,17 @@ The pull-request pipeline must fail on:
 
 ## Commands
 
-Target commands after the repository is generated:
+Canonical local Kubernetes validation:
 
 ```bash
 ./mvnw -T 1C clean verify
+./scripts/k8s-validate.sh
+./scripts/local-k8s-test.sh
+```
+
+Legacy full-fleet Compose remains available as an alternate runtime:
+
+```bash
 docker compose -f infra/compose/compose.yml config
 docker compose -f infra/compose/compose.yml up -d
 docker compose -f infra/compose/compose.yml ps
@@ -80,4 +87,3 @@ A numbered Copilot prompt is complete only when:
 4. there are no placeholder methods/TODO-only implementations;
 5. Copilot explains the main request/event flow and the developer can restate it;
 6. changes are committed with a narrow message.
-

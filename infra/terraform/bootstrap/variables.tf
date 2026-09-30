@@ -31,3 +31,14 @@ variable "cost_center" {
   type        = string
   default     = "learning-exercise"
 }
+
+variable "state_history_retention_days" {
+  description = "Days to retain noncurrent Terraform state versions before automatic expiry."
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = var.state_history_retention_days >= 1 && var.state_history_retention_days <= 90
+    error_message = "state_history_retention_days must be between 1 and 90 for a temporary learning exercise."
+  }
+}

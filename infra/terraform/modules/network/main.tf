@@ -6,14 +6,34 @@ variable "name_prefix" {
   type = string
 }
 
-variable "vpc_cidr" {
-  type    = string
-  default = "10.42.0.0/16"
-}
-
 variable "azs" {
   description = "Availability zones to spread the two public subnets across (EKS and RDS subnet groups need >= 2)."
   type        = list(string)
+}
+
+variable "vpc_cidr" {
+  type = string
+}
+
+variable "operator_cidr" {
+  type = string
+}
+
+variable "create_gateway_alb" {
+  description = "Create the HTTPS gateway ALB security group. False in port-forward mode, where no public entry point exists."
+  type        = bool
+  default     = false
+}
+
+variable "alb_ingress_cidrs" {
+  description = "Explicit /32 sources allowed to reach the HTTPS gateway ALB."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for cidr in var.alb_ingress_cidrs : endswith(cidr, "/32") && !startswith(cidr, "0.0.0.0")])
+    error_message = "alb_ingress_cidrs must contain only specific /32 addresses."
+  }
 }
 
 variable "tags" {
@@ -93,83 +113,47 @@ resource "aws_subnet" "db" {
 # --- Security groups ---------------------------------------------------------
 
 resource "aws_security_group" "alb" {
+  count = var.create_gateway_alb ? 1 : 0
+
   name        = "${var.name_prefix}-alb-sg"
-  description = "Internet-facing ALB: allow inbound 80/443 from the internet."
+  description = "Gateway ALB: inbound HTTPS only, from allowlisted operator addresses."
   vpc_id      = aws_vpc.this.id
 
+  lifecycle {
+    precondition {
+      condition     = length(var.alb_ingress_cidrs) > 0
+      error_message = "Refusing to create a gateway ALB security group without an explicit /32 allowlist."
+    }
+  }
+
+  # HTTPS only. Port 80 is deliberately never opened: login requests carry
+  # passwords and responses carry JWTs, and an HTTP listener (even one that
+  # only redirects) lets a client send those in plaintext first. The platform
+  # also must not be broadly reachable while auth-service registration accepts
+  # caller-supplied roles, so sources are restricted to explicit /32s.
   ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
+    description = "HTTPS from explicitly allowlisted operator addresses only"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.alb_ingress_cidrs
   }
 
   egress {
+    description = "Only to targets inside the sandbox VPC"
     from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-alb-sg" })
 }
 
-resource "aws_security_group" "eks_nodes" {
-  name        = "${var.name_prefix}-eks-nodes-sg"
-  description = "EKS worker nodes/pods: no inbound from the internet, only from the ALB and within the cluster."
-  vpc_id      = aws_vpc.this.id
-
-  ingress {
-    description     = "Traffic from the ALB"
-    from_port       = 0
-    to_port         = 65535
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
-
-  ingress {
-    description = "Intra-cluster traffic (node-to-node, node-to-control-plane)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    self        = true
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(var.tags, { Name = "${var.name_prefix}-eks-nodes-sg" })
-}
-
 resource "aws_security_group" "rds" {
   name        = "${var.name_prefix}-rds-sg"
-  description = "RDS MySQL: inbound 3306 only from the EKS node/pod security group."
+  description = "RDS MySQL: inbound access is added only from the EKS cluster security group."
   vpc_id      = aws_vpc.this.id
-
-  ingress {
-    description     = "MySQL from EKS nodes/pods only"
-    from_port       = 3306
-    to_port         = 3306
-    protocol        = "tcp"
-    security_groups = [aws_security_group.eks_nodes.id]
-  }
-
-  ingress {
-    # EKS managed node groups (without a custom launch template) use the
-    # cluster's auto-created security group on their primary ENI, not the
-    # eks_nodes SG above. Allow MySQL from the whole VPC CIDR (private +
-    # public subnets only, no internet exposure) so pods can reach RDS.
-    description = "MySQL from within the VPC (covers EKS auto cluster SG)"
-    from_port   = 3306
-    to_port     = 3306
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
 
   egress {
     from_port   = 0
@@ -193,12 +177,9 @@ output "db_subnet_ids" {
   value = aws_subnet.db[*].id
 }
 
+# Empty in port-forward mode, where no ALB security group exists.
 output "alb_security_group_id" {
-  value = aws_security_group.alb.id
-}
-
-output "eks_nodes_security_group_id" {
-  value = aws_security_group.eks_nodes.id
+  value = try(aws_security_group.alb[0].id, "")
 }
 
 output "rds_security_group_id" {

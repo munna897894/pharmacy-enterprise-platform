@@ -1,5 +1,7 @@
 # Prompt 07 — Resilience and controlled failures (current state)
 
+> **Status (2026-09-30): Complete.** Current runtime topology is documented in [local deployment](../docs/architecture-local.md); observability behavior is in [the observability guide](../docs/11-observability.md).
+
 This file documents the resilience-oriented work that was implemented and stabilized in the repo, rather than only the original task brief.
 
 ## Status
@@ -40,4 +42,3 @@ The repo includes the test-friendly failure controls needed to simulate:
 - product reads still function when Redis degrades
 - order state remains consistent when downstream dependencies are temporarily unavailable
 - graceful shutdown happens before service termination
-

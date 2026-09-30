@@ -1,5 +1,7 @@
 # Prompt 10 — Metrics, logs and distributed traces
 
+> **Status (2026-09-30): Complete.** Current baseline and deployment-specific observability are documented in [observability](../docs/11-observability.md).
+
 ## Give Copilot these files
 
 - `docs/02-architecture.md`

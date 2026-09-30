@@ -4,13 +4,13 @@
 
 Use domain topics plus retry/dead-letter topics. Initial local partition count is 3 for business topics and 1 for DLTs. Replication factor is 1 locally only.
 
-| Topic | Key | Producers | Consumers |
-|---|---|---|---|
-| `pharmacy.prescription.events.v1` | prescriptionId | prescription-service | audit, notification |
-| `pharmacy.order.events.v1` | orderId | order-service | inventory, notification, audit |
-| `pharmacy.inventory.events.v1` | orderId | inventory-service | order, payment, audit |
-| `pharmacy.payment.events.v1` | orderId | payment-service | order, inventory, notification, audit |
-| `pharmacy.notification.events.v1` | notificationId | notification-service | audit |
+| Topic | Key | Producers | Consumers | Current implementation |
+|---|---|---|---|---|
+| `pharmacy.prescription.events.v1` | prescriptionId | prescription-service | audit, notification | Contract and consumers exist; producer is not implemented |
+| `pharmacy.order.events.v1` | orderId | order-service | inventory, notification, audit | Active |
+| `pharmacy.inventory.events.v1` | orderId | inventory-service | order, payment, audit | Active |
+| `pharmacy.payment.events.v1` | orderId | payment-service | order, inventory, notification, audit | Active |
+| `pharmacy.notification.events.v1` | notificationId | notification-service | audit | Active |
 
 Each source topic has `<topic>.retry` and `<topic>.dlt` for the educational retry design. Do not create infinite retries.
 
@@ -44,6 +44,8 @@ producers from adopting the envelope.
 
 ### PrescriptionVerified
 
+Reserved contract: prescription-service does not yet emit this event.
+
 ```json
 {
   "prescriptionId": "uuid",
@@ -58,6 +60,7 @@ producers from adopting the envelope.
 ### PrescriptionRejected
 
 Payload: `prescriptionId`, `customerId`, `reasonCode`, `reason`, `rejectedAt`.
+This is also a reserved contract until the prescription producer is added.
 
 ### OrderCreated
 
@@ -87,13 +90,22 @@ Payload: `paymentId`, `orderId`, `amount`, `currency`, `failureCode`, `failedAt`
 
 ### OrderConfirmed
 
+Reserved contract: order-service currently transitions to `CONFIRMED` after
+`PaymentCompleted` but does not publish this outcome.
+
 Payload: `orderId`, `customerId`, `pharmacyId`, `confirmedAt`, `pickupCode`.
 
 ### OrderCancelled
 
+Reserved contract: order-service currently persists inventory/payment
+cancellation states but does not publish this outcome.
+
 Payload: `orderId`, `customerId`, `reasonCode`, `cancelledAt`.
 
 ### OrderReadyForPickup
+
+Reserved contract: the current ready-for-pickup command updates order state
+without publishing this event.
 
 Payload: `orderId`, `customerId`, `pharmacyId`, `readyAt`, `pickupCode`.
 
@@ -130,8 +142,10 @@ Do not reuse one group for consumers that must each receive a copy.
 - Producer acknowledgements: strongest practical local setting; enable idempotent producer.
 - Consumer commits occur after successful transaction/business processing.
 - Consumer inserts `processed_event` within the same local database transaction as the business effect.
-- Transient errors: bounded backoff, then retry topic/DLT.
-- Non-retryable validation/schema errors: DLT immediately.
+- Spring Cloud Stream consumers use bounded attempts and explicit DLTs.
+- Raw Spring Kafka listeners in order, inventory and payment currently use
+  `DefaultErrorHandler` without a `DeadLetterPublishingRecoverer`; provisioned
+  retry/DLT topics do not by themselves route exhausted raw-listener records.
 - DLT record retains original topic, partition, offset, exception class, failure timestamp and correlation ID.
 - Alert on DLT count and sustained consumer lag.
 

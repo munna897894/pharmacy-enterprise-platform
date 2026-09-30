@@ -1,0 +1,152 @@
+# Optional overlay. Supplying this file is the enablement action; the baseline
+# chart only writes logs to Loki. Create the named Secret only during an
+# approved trial. Required keys: endpoint, hec-token.
+alloy:
+  controller:
+    volumes:
+      extra:
+        - name: splunk-hec
+          secret:
+            secretName: splunk-hec
+            items:
+              - key: hec-token
+                path: hec-token
+  alloy:
+    extraArgs:
+      - --feature.community-components.enabled
+    extraEnv:
+      - name: SPLUNK_HEC_ENDPOINT
+        valueFrom:
+          secretKeyRef:
+            name: splunk-hec
+            key: endpoint
+      - name: SPLUNK_INDEX
+        value: pharmacy_nonprod
+      - name: SPLUNK_SOURCETYPE
+        value: pharmacy:service:json
+    mounts:
+      extra:
+        - name: splunk-hec
+          mountPath: /var/run/secrets/splunk
+          readOnly: true
+    configMap:
+      content: |
+        local.file "splunk_hec_token" {
+          filename  = "/var/run/secrets/splunk/hec-token"
+          is_secret = true
+        }
+
+        discovery.kubernetes "pods" {
+          role = "pod"
+        }
+
+        discovery.relabel "pharmacy_pods" {
+          targets = discovery.kubernetes.pods.targets
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            action        = "keep"
+            regex         = "pharmacy"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_init"]
+            action        = "drop"
+            regex         = "true"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label  = "pod"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label  = "container"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name", "__meta_kubernetes_pod_label_app"]
+            separator     = ";"
+            regex         = ";*([^;]+).*"
+            target_label  = "app"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+            separator     = "/"
+            target_label  = "job"
+          }
+        }
+
+        loki.source.kubernetes "pods" {
+          targets = discovery.relabel.pharmacy_pods.output
+          forward_to = [
+            loki.process.pharmacy.receiver,
+            otelcol.receiver.loki.splunk.receiver,
+          ]
+        }
+
+        loki.process "pharmacy" {
+          stage.static_labels {
+            values = {
+              cluster = "{{ .Values.clusterName }}",
+            }
+          }
+
+          forward_to = [loki.write.default.receiver]
+        }
+
+        loki.write "default" {
+          endpoint {
+            url = "http://pharmacy-observability-loki:3100/loki/api/v1/push"
+          }
+        }
+
+        otelcol.receiver.loki "splunk" {
+          output {
+            logs = [otelcol.processor.batch.splunk.input]
+          }
+        }
+
+        otelcol.processor.batch "splunk" {
+          timeout         = "5s"
+          send_batch_size = 512
+
+          output {
+            logs = [otelcol.exporter.splunkhec.logs.input]
+          }
+        }
+
+        otelcol.exporter.splunkhec "logs" {
+          splunk {
+            token                  = local.file.splunk_hec_token.content
+            index                  = sys.env("SPLUNK_INDEX")
+            source                 = "pharmacy-platform"
+            sourcetype             = sys.env("SPLUNK_SOURCETYPE")
+            log_data_enabled       = true
+            profiling_data_enabled = false
+          }
+
+          client {
+            endpoint = sys.env("SPLUNK_HEC_ENDPOINT")
+          }
+
+          retry_on_failure {
+            enabled          = true
+            initial_interval = "1s"
+            max_interval     = "10s"
+            max_elapsed_time = "60s"
+          }
+
+          sending_queue {
+            enabled       = true
+            queue_size    = 1024
+            num_consumers = 2
+          }
+        }

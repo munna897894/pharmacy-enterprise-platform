@@ -11,7 +11,8 @@ pharmacy-enterprise-platform (pom, packaging=pom)
 │
 ├── platform/
 │   ├── event-contracts      (library: shared DomainEvent<T> + payload records)
-│   └── test-support         (library: shared test/ArchUnit helpers)
+│   ├── test-support         (library: shared test/ArchUnit helpers)
+│   └── observability        (library: correlation, tracing and metrics helpers)
 │
 └── services/
     ├── api-gateway           (WebFlux)
@@ -34,8 +35,9 @@ Each service module has its own POM inheriting from the root, and its own runnab
 
 | File | Purpose |
 |---|---|
-| `/pom.xml` | Root aggregator + parent. Declares all 13 modules, dependencyManagement (event-contracts, test-support, Spring Cloud BOM), plugin management (compiler, surefire, failsafe, jacoco), and the Enforcer plugin rule requiring Java 21+. |
-| `platform/event-contracts/.../DomainEvent.java` | The one shared event envelope record used by every Kafka producer/consumer across the platform. |
+| `/pom.xml` | Root aggregator + parent. Declares 15 modules (three platform libraries and twelve workloads), dependencyManagement (including Spring Cloud BOM), plugin management and the Enforcer rule requiring Java 21+. |
+| `platform/event-contracts/.../DomainEvent.java` | Shared intended envelope record; some Kafka producers emit flat payloads instead, which audit normalizes. |
+| `platform/observability/` | Shared correlation, trace-header and metrics helpers used across services. |
 | `platform/test-support/.../ArchitectureTestSupport.java` | Placeholder/marker class; actual ArchUnit rules live per-service (see below), not centralized. |
 | `services/*/src/test/java/.../ArchitectureRulesTest.java` | Per-service ArchUnit test — the actual enforcement mechanism for "no cross-service dependency." |
 
@@ -43,7 +45,7 @@ Each service module has its own POM inheriting from the root, and its own runnab
 
 | Concept | Explanation | Why it matters |
 |---|---|---|
-| Parent vs aggregator POM | This root POM is *both*: `<packaging>pom</packaging>` makes it an aggregator (defines `<modules>` to build), while also being a Maven **parent** any module can inherit from for shared config (though here modules actually inherit from `spring-boot-starter-parent` directly with this POM providing dependencyManagement instead — check actual per-service parent tag). | Confusing distinction in interviews — aggregator = "what to build together"; parent = "what config to inherit." |
+| Parent vs aggregator POM | The root POM inherits from `spring-boot-starter-parent` and aggregates modules; service modules inherit shared settings from the root. | Aggregator = "what to build together"; parent = "what config to inherit." |
 | `dependencyManagement` vs `dependencies` | Root POM only *manages* versions (event-contracts, test-support, Spring Cloud BOM); it doesn't force every module to include them. | Prevents version drift without forcing unwanted transitive deps. |
 | Maven Enforcer plugin | Fails the build if Java < 21 or Maven < 3.9.0. | Catches environment drift before a confusing runtime failure. |
 | Multi-module reactor build | `./mvnw clean verify` builds all modules in dependency order in one pass. | Single source of truth for "does the whole platform compile and pass tests." |
@@ -76,4 +78,4 @@ A: Flyway owns schema changes; Hibernate should only validate that entity mappin
 3. Each module compiles, runs unit tests (Surefire), then (if configured) integration tests (Failsafe).
 4. JaCoCo instruments and reports coverage per module during `verify`.
 5. ArchUnit tests run as normal JUnit tests inside each service's test phase — a violation here fails `verify` just like any other test failure.
-6. If everything passes, the reactor reports success across all 13 modules.
+6. If everything passes, the reactor reports success across all 15 modules.

@@ -32,10 +32,18 @@ Only fictional data is permitted.
 | `audit-service` | Append-only business audit view | `audit_db` |
 | `external-mock-service` | Controllable insurance/prescriber/payment-like failures and delays | In-memory only |
 
+The ten durable schemas use their concrete deployment names (`auth_service`,
+`pharmacy_product`, `pharmacy_customer`, `pharmacy_pharmacy`,
+`pharmacy_inventory`, `prescription_service`, `pharmacy_order`,
+`pharmacy_payment`, `pharmacy_notification`, `pharmacy_audit`). The shorter
+names above describe ownership, not literal schema identifiers.
+
 ## Fixed decisions
 
 - Monorepo with independent Maven service modules and one root aggregator POM.
-- Database per service in principle; one MySQL container with separate schemas locally.
+- Database ownership per service; the canonical local runtime uses one
+  project-scoped native MySQL server with separate schemas/users, and the AWS
+  sandbox uses one private RDS instance with the same logical isolation.
 - No distributed database transactions.
 - Choreography saga for the order workflow.
 - Transactional outbox in services that publish state-changing business events.
@@ -78,6 +86,13 @@ Login -> JWT -> Gateway -> Search medication -> Submit prescription
 - Full OAuth/OIDC provider such as Keycloak (valuable follow-up, not core scope)
 - Long-running paid AWS infrastructure
 
+## Deployment views
+
+- [Local Docker Desktop Kubernetes architecture](architecture-local.md)
+- [Temporary AWS EKS sandbox architecture](architecture-cloud.md)
+
+The two environments are independent and never call each other.
+
 ## Optional stretch items
 
 Only attempt these after all acceptance criteria pass:
@@ -88,4 +103,3 @@ Only attempt these after all acceptance criteria pass:
 - Canary deployment with Argo Rollouts
 - Vault/External Secrets Operator
 - Multi-broker Kafka and chaos testing
-

@@ -10,7 +10,7 @@ Use this compatibility family unless an official BOM requires a patch adjustment
 | Maven | 3.9+ via wrapper | Commit the wrapper |
 | Spring Boot | 3.5.16 | Use the latest available 3.5.x patch if 3.5.16 is unavailable |
 | Spring Cloud | 2025.0.3 | 2025.0.x is the official train for Boot 3.5.x |
-| Apache Kafka broker | 4.3.1 KRaft | Pin image; no `latest` |
+| Apache Kafka broker | 4.3.1 KRaft locally; 3.9.1 image in AWS | Pin deployment-specific version; no `latest` |
 | MySQL | 8.4 LTS | Pin major/minor image |
 | Redis | 7.4 | Pin major/minor image |
 | Docker Compose | v2 | Use `docker compose`, not legacy `docker-compose` |
@@ -71,4 +71,3 @@ Before generating modules, Copilot must:
 5. Save the resolved versions in the root README.
 
 Do not migrate this learning project to Spring Boot 4 during the 15-day implementation. Boot 3.5.x is intentionally retained to match the planned enterprise stack and reduce migration noise.
-

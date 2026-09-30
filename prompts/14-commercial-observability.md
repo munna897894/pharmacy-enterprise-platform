@@ -1,5 +1,7 @@
 # Prompt 14 — Dynatrace and Splunk integrations
 
+> **Status (2026-09-30): Repository setup prepared only.** Dynatrace/Splunk account or trial activation and live ingestion validation are deferred. Preparation is documented in [commercial observability](../docs/12-commercial-observability.md); offline rendering is not live validation.
+
 ## Give Copilot these files
 
 - `docs/02-architecture.md`

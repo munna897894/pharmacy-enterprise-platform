@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-mock-service
+  namespace: pharmacy
+  labels:
+    app: external-mock-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: external-mock-service
+  template:
+    metadata:
+      labels:
+        app: external-mock-service
+    spec:
+      automountServiceAccountToken: false
+      # The Service is named external-mock-service, so Kubernetes service links
+      # would inject EXTERNAL_MOCK_SERVICE_PORT=tcp://<ip>:8080 and break
+      # server.port. The explicit env below also overrides it.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: external-mock-service
+          image: __EXTERNAL_MOCK_SERVICE_IMAGE__
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=50 -XX:+UseG1GC"
+            - name: EXTERNAL_MOCK_SERVICE_PORT
+              value: "8080"
+            - name: ENVIRONMENT
+              value: "aws"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://pharmacy-observability-opentelemetry-collector.pharmacy-observability.svc.cluster.local:4318/v1/traces"
+            - name: TRACING_SAMPLING_PROBABILITY
+              value: "1.0"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-mock-service
+  namespace: pharmacy
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /actuator/prometheus
+    prometheus.io/port: "8080"
+spec:
+  type: ClusterIP
+  selector:
+    app: external-mock-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

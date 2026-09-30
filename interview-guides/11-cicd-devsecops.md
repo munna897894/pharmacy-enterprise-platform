@@ -65,6 +65,8 @@ Reviewed image-SHA change in a separate deployment-config repository
   should be specific and time-bounded.
 - Local SonarQube is optional and started with Compose profile `sonar`. Its
   token is supplied through the developer shell, never committed.
+- Compose is a legacy full-fleet alternative; the canonical local application
+  runtime is the Docker Desktop Kubernetes chart with host-native MySQL/Kafka.
 - The auth-service release image receives its JWT key pair through a Kubernetes
   Secret mount. Only local Compose builds use the committed test-key fixture.
 - The release run summary and per-service artifacts expose the pushed image

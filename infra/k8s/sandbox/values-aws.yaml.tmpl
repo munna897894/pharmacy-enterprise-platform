@@ -1,0 +1,114 @@
+# AWS overlay for infra/helm/pharmacy-platform (chart is owned separately and is
+# canonical). Rendered by scripts/aws-render-manifests.sh from Terraform outputs.
+# Contains image URIs, schema/user names and Kubernetes Secret *names* only:
+# never passwords, key material or Secrets Manager values.
+namespace: pharmacy
+imagePullPolicy: IfNotPresent
+defaultResources:
+  requests:
+    cpu: 75m
+    memory: 256Mi
+  limits:
+    cpu: 400m
+    memory: 512Mi
+commonConfig:
+  ENVIRONMENT: aws
+  DB_HOST: __RDS_ENDPOINT__
+  DB_PORT: "3306"
+  KAFKA_BOOTSTRAP_SERVERS: kafka.pharmacy.svc.cluster.local:9092
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  AUTH_SERVICE_HOST: auth-service
+  AUTH_SERVICE_PORT: "8081"
+  INVENTORY_SERVICE_BASE_URL: http://inventory-service:8085
+  ORDER_SERVICE_BASE_URL: http://order-service:8087
+  PAYMENT_SERVICE_BASE_URL: http://payment-service:8088
+  CUSTOMER_SERVICE_BASE_URL: http://customer-service:8083
+  PAYMENT_GATEWAY_BASE_URL: http://external-mock-service:8080
+  NOTIFICATION_EMAIL_MODE: simulated
+  TRACING_SAMPLING_PROBABILITY: "1.0"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://pharmacy-observability-opentelemetry-collector.pharmacy-observability.svc.cluster.local:4318/v1/traces
+  JWT_ISSUER: http://auth-service:8081
+  JWT_ISSUER_URI: http://auth-service:8081
+  JWT_AUDIENCE: pharmacy-api
+  JWT_JWK_SET_URI: http://auth-service:8081/api/v1/auth/.well-known/jwks.json
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://auth-service:8081/api/v1/auth/.well-known/jwks.json
+redis:
+  enabled: true
+  image: redis:7.4.11
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+services:
+  api-gateway:
+    image: __API_GATEWAY_IMAGE__
+    port: 8080
+    managementPort: 9081
+    serviceAccountName: api-gateway
+    env:
+      LOGGING_FILE_NAME: /tmp/api-gateway.log
+  auth-service:
+    image: __AUTH_SERVICE_IMAGE__
+    port: 8081
+    serviceAccountName: auth-service
+    authKeys: auth-service-jwt
+    env:
+      JWT_PRIVATE_KEY_PATH: /etc/auth/private_key.pem
+      JWT_PUBLIC_KEY_PATH: /etc/auth/public_key.pem
+    db: {name: auth_service, user: auth_user, secretName: auth-service-db, passwordKey: password}
+  product-service:
+    image: __PRODUCT_SERVICE_IMAGE__
+    port: 8082
+    serviceAccountName: product-service
+    env:
+      PRODUCT_SERVICE_PORT: "8082"
+    db: {name: pharmacy_product, user: product_user, secretName: product-service-db, passwordKey: password}
+  customer-service:
+    image: __CUSTOMER_SERVICE_IMAGE__
+    port: 8083
+    serviceAccountName: customer-service
+    db: {name: pharmacy_customer, user: customer_user, secretName: customer-service-db, passwordKey: password}
+  pharmacy-service:
+    image: __PHARMACY_SERVICE_IMAGE__
+    port: 8084
+    serviceAccountName: pharmacy-service
+    db: {name: pharmacy_pharmacy, user: pharmacy_user, secretName: pharmacy-service-db, passwordKey: password}
+  inventory-service:
+    image: __INVENTORY_SERVICE_IMAGE__
+    port: 8085
+    serviceAccountName: inventory-service
+    db: {name: pharmacy_inventory, user: inventory_user, secretName: inventory-service-db, passwordKey: password}
+  prescription-service:
+    image: __PRESCRIPTION_SERVICE_IMAGE__
+    port: 8086
+    serviceAccountName: prescription-service
+    db: {name: prescription_service, user: prescription_user, secretName: prescription-service-db, passwordKey: password}
+  order-service:
+    image: __ORDER_SERVICE_IMAGE__
+    port: 8087
+    serviceAccountName: order-service
+    db: {name: pharmacy_order, user: order_user, secretName: order-service-db, passwordKey: password}
+  payment-service:
+    image: __PAYMENT_SERVICE_IMAGE__
+    port: 8088
+    serviceAccountName: payment-service
+    db: {name: pharmacy_payment, user: payment_user, secretName: payment-service-db, passwordKey: password}
+  notification-service:
+    image: __NOTIFICATION_SERVICE_IMAGE__
+    port: 8089
+    serviceAccountName: notification-service
+    db: {name: pharmacy_notification, user: notification_user, secretName: notification-service-db, passwordKey: password}
+  audit-service:
+    image: __AUDIT_SERVICE_IMAGE__
+    port: 8090
+    serviceAccountName: audit-service
+    db: {name: pharmacy_audit, user: audit_user, secretName: audit-service-db, passwordKey: password}
+  external-mock-service:
+    image: __EXTERNAL_MOCK_SERVICE_IMAGE__
+    port: 8080
+    serviceAccountName: external-mock-service
+    env:
+      EXTERNAL_MOCK_SERVICE_PORT: "8080"

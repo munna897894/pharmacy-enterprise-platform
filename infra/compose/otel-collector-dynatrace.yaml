@@ -1,0 +1,52 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  resource/commercial:
+    attributes:
+      - key: deployment.environment.name
+        value: local-commercial
+        action: upsert
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  otlphttp/dynatrace:
+    endpoint: ${env:DYNATRACE_OTLP_ENDPOINT}
+    headers:
+      Authorization: "Api-Token ${file:/run/secrets/dynatrace-api-token}"
+    sending_queue:
+      enabled: true
+      queue_size: 1024
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: pharmacy_otel
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/commercial, batch]
+      exporters: [otlp/tempo, otlphttp/dynatrace]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/commercial, batch]
+      exporters: [prometheus]

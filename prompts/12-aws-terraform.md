@@ -1,5 +1,7 @@
 # Prompt 12 — Temporary AWS/Terraform learning phase
 
+> **Status (2026-09-30): Complete; AWS full-fleet sandbox prepared, not live-verified.** See [AWS deployment](../docs/architecture-cloud.md) and the [AWS plan review](../docs/aws-plan-review.md) for current scope and safeguards.
+
 This phase is optional and must not block local completion. It creates billable resources. Configure AWS Budgets first, use a dedicated sandbox account when possible, and destroy resources after the exercise.
 
 ## Give Copilot these files
@@ -58,4 +60,3 @@ Provide scripts/runbooks for plan/apply, smoke validation, destroy and post-dest
 - RDS managed responsibilities
 - ALB/Ingress relationship
 - Terraform state, plan and drift
-

@@ -1,5 +1,7 @@
 # Prompt 11 — GitHub Actions, quality and GitOps
 
+> **Status (2026-09-30): Complete.** This prompt is the preserved implementation brief; repository workflows and current deployment facts remain authoritative.
+
 ## Give Copilot these files
 
 - `docs/03-repository-structure.md`
@@ -60,4 +62,3 @@ Pin third-party actions to trusted versions/SHAs according to current GitHub gui
 - Supply-chain risks and action pinning
 - Push deployment vs GitOps reconciliation
 - Rollback using immutable images
-

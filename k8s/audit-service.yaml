@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: audit-service
-          image: docker.io/munna897/pharmacy-audit-service:local-20260917-2
+          image: pharmacy/audit-service:local
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -31,14 +31,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8086
+            - containerPort: 8090
           envFrom:
             - configMapRef:
                 name: pharmacy-common
-            - secretRef:
-                name: pharmacy-secrets
           env:
             - name: DB_HOST
               value: host.docker.internal
@@ -54,13 +52,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: 8086
+              port: 8090
             initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: 8086
+              port: 8090
             initialDelaySeconds: 30
             periodSeconds: 15
       volumes:
@@ -76,6 +74,6 @@ spec:
   selector:
     app: audit-service
   ports:
-    - port: 8086
-      targetPort: 8086
+    - port: 8090
+      targetPort: 8090
   type: ClusterIP

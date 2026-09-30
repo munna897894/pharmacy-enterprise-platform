@@ -2,6 +2,7 @@
 *.iml
 .DS_Store
 .env
+.local/
 target/
 *.log
 k8s/pharmacy-secrets.yaml

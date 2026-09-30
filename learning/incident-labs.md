@@ -19,17 +19,29 @@ Prevention/alert improvement:
 
 Do not ask Copilot for the answer until you have collected evidence and ranked at least three hypotheses.
 
+Use the canonical full Docker Desktop Kubernetes fleet for runnable local labs
+(`docs/self-run-guide.md`): project MySQL on `3308`, Kafka host listener
+`19092`/pod listener `29092`, in-cluster Redis and external mock. These are
+exercises, not evidence that each fault has been injected or resolved. The
+current prescription service does not call an external verifier, and the
+full-fleet AWS sandbox has not been live-verified.
+
 ## INC-01 — API latency jumps from 300 ms to 9 seconds
 
-**Inject:** configure external prescription verification delay.
+**Inject:** set the external payment mock to `DELAY` (see
+`scripts/resilience-lab.sh slow-payment`); a prescription-verification delay
+is only a future exercise until that outbound verification exists.
 
-**Observe:** gateway p95, service trace waterfall, client timeout, circuit state and correlation logs.
+**Observe:** gateway p95, payment/mock trace waterfall, client timeout and
+correlation logs; check circuit state only if a breaker is configured on the
+specific client.
 
 **Success:** identify the exact downstream span and explain whether retry worsened latency.
 
 ## INC-02 — Inventory pods restart continuously
 
-**Inject:** reduce memory limit or use a local-only controlled allocation endpoint.
+**Inject:** lower the inventory pod's local lab memory limit within safe
+resources; restore the chart values afterward.
 
 **Observe:** pod status/restarts, `describe`, last termination reason, previous logs, memory graph and events.
 
@@ -149,4 +161,3 @@ Do not ask Copilot for the answer until you have collected evidence and ranked a
 6. Mitigate safely before deep repair when impact is active.
 7. Validate customer path and monitoring recovery.
 8. Write RCA with evidence, not guesses.
-

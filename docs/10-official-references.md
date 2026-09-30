@@ -40,7 +40,13 @@ Use official documentation when Copilot proposes a dependency, annotation, confi
 - OpenTelemetry: https://opentelemetry.io/docs/
 - Prometheus: https://prometheus.io/docs/
 - Grafana: https://grafana.com/docs/grafana/latest/
+- Grafana Loki: https://grafana.com/docs/loki/latest/
+- Grafana Tempo: https://grafana.com/docs/tempo/latest/
+- Grafana Alloy: https://grafana.com/docs/alloy/latest/
 - Micrometer: https://docs.micrometer.io/micrometer/reference/
+- Dynatrace OpenTelemetry: https://docs.dynatrace.com/docs/ingest-from/opentelemetry
+- Dynatrace Operator: https://docs.dynatrace.com/docs/ingest-from/setup-on-k8s
+- Splunk HTTP Event Collector: https://help.splunk.com/en/splunk-enterprise/get-data-in/get-started-with-getting-data-in/10.4/get-data-with-http-event-collector
 
 ## AWS and Terraform
 
@@ -53,4 +59,3 @@ Use official documentation when Copilot proposes a dependency, annotation, confi
 ## Version note
 
 This kit intentionally targets Java 21, Spring Boot 3.5.x and Spring Cloud 2025.0.x. At the time the kit was prepared, Spring's official compatibility table mapped Spring Cloud 2025.0.x to Spring Boot 3.5.x. Recheck official compatibility before beginning if you intentionally change either release family.
-

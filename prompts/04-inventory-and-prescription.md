@@ -1,5 +1,7 @@
 # Prompt 04 — Inventory and prescription services (current state)
 
+> **Status (2026-09-30): Complete.** Current architecture and runtime topology are in [architecture](../docs/02-architecture.md) and [local deployment](../docs/architecture-local.md).
+
 This prompt reflects the implemented inventory, external verification, and prescription workflow in the codebase.
 
 ## Status
@@ -64,4 +66,3 @@ The prescription verification flow is deliberately structured so that external I
 - time-bound external verification without unsafe retries
 - idempotency for duplicates and replays
 - event-driven status propagation after verification
-

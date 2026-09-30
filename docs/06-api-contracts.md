@@ -56,7 +56,8 @@ Search filters: `q`, `manufacturer`, `dosageForm`, `active`.
 | GET | `/api/v1/customers/{id}/addresses` | Owner or staff | List addresses |
 | POST | `/api/v1/customers/{id}/addresses` | Owner or ADMIN | Add address |
 
-Owner checks compare JWT `userId` with `auth_user_id`; staff roles may access only for the fictional workflow.
+Owner checks compare the JWT `sub` value with `auth_user_id`; staff roles may
+access only for the fictional workflow.
 
 ## Pharmacy service
 
@@ -74,41 +75,56 @@ Optional search filters: `postalCode`, `status`, `latitude`, `longitude`, `radiu
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/inventory` | PHARMACIST/STORE_MANAGER/ADMIN | Query stock by pharmacy/medication |
-| PUT | `/api/v1/inventory/{pharmacyId}/{medicationId}` | STORE_MANAGER/ADMIN | Set/adjust stock with optimistic lock |
+| GET | `/api/v1/inventory/stock-levels/{id}` | Authenticated | Read one stock level |
+| GET | `/api/v1/inventory/pharmacies/{pharmacyId}` | Authenticated | List pharmacy stock |
+| GET | `/api/v1/inventory/pharmacies/{pharmacyId}/products/{productId}` | Authenticated | Read pharmacy/product stock |
+| GET | `/api/v1/inventory/pharmacies/{pharmacyId}/low-stock` | Authenticated | List low-stock items |
+| POST | `/api/v1/inventory/stock-levels` | STORE_MANAGER/ADMIN | Create a stock level |
+| POST | `/api/v1/inventory/stock-levels/{id}/adjust` | PHARMACIST/STORE_MANAGER/ADMIN | Adjust stock with an audit record |
+| GET | `/api/v1/inventory/stock-levels/{id}/history` | Authenticated | Read stock adjustments |
 | GET | `/api/v1/inventory/availability` | Authenticated | Read availability for ordering |
-| GET | `/api/v1/inventory/reservations/{orderId}` | Staff | Reservation status |
+| GET | `/api/v1/inventory/reservations/{orderId}` | Authenticated | Reservation status |
 
-Inventory reservation/release for orders occurs through Kafka, not a public mutation endpoint.
+The service permits the availability endpoint internally without a JWT so
+order-service can call it; the gateway still protects its public route.
+Inventory reservation/release for orders occurs through Kafka, not a public
+mutation endpoint.
 
 ## Prescription service
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
-| POST | `/api/v1/prescriptions` | CUSTOMER/PHARMACIST | Submit fictional prescription |
-| GET | `/api/v1/prescriptions/{id}` | Owner or staff | Read status |
-| GET | `/api/v1/prescriptions` | Staff; customer sees own | Search/page |
-| POST | `/api/v1/prescriptions/{id}/verify` | PHARMACIST | Trigger verification |
-| POST | `/api/v1/prescriptions/{id}/reject` | PHARMACIST | Manual rejection with reason |
+| POST | `/api/v1/prescriptions` | PHARMACIST/STORE_MANAGER/ADMIN | Create fictional prescription |
+| GET | `/api/v1/prescriptions/{id}` | Authenticated | Read prescription |
+| GET | `/api/v1/prescriptions?status={status}` | Authenticated | Page by optional status |
+| GET | `/api/v1/prescriptions/customers/{customerId}` | Authenticated | Page by customer |
+| POST | `/api/v1/prescriptions/{id}/activate` | PHARMACIST/ADMIN | Move `PENDING` to `ACTIVE` |
+| PUT | `/api/v1/prescriptions/{id}/lines/{lineId}/fill` | PHARMACIST/ADMIN | Record dispensed quantity |
 
-The verification command is idempotent. A verified/rejected prescription cannot be re-verified without an explicit future feature.
+The implemented lifecycle is `PENDING -> ACTIVE -> FILLED` (or `EXPIRED`).
+Customer ownership is not yet enforced on read routes; see `known-gaps.md`.
 
 ## Order service
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
 | POST | `/api/v1/orders` | CUSTOMER/PHARMACIST | Create order; requires `Idempotency-Key` |
-| GET | `/api/v1/orders/{id}` | Owner or staff | Order and status history |
-| GET | `/api/v1/orders` | Customer own/staff search | Page orders |
+| GET | `/api/v1/orders/{id}` | Authenticated at gateway | Order details |
+| GET | `/api/v1/orders/{id}/status` | Authenticated at gateway | Lightweight order status |
+| GET | `/api/v1/orders?customerId={customerId}` | Authenticated | Page orders by customer |
+| POST | `/api/v1/orders/{id}/cancel` | Authenticated | Cancel an eligible order |
 | POST | `/api/v1/orders/{id}/ready` | PHARMACIST | Mark ready for pickup |
 | POST | `/api/v1/orders/{id}/complete` | PHARMACIST | Complete pickup |
 
 Create request: `customerId`, `prescriptionId`, `pharmacyId`, `paymentToken`, and one or more `{medicationId, quantity}` items. The service resolves authoritative prices; it never trusts client totals.
+The current order controller does not complete owner/role authorization on
+read/list/state-change routes; see `known-gaps.md`.
 
 ## Payment service
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
+| POST | `/api/v1/payments` | Owner or staff | Direct simulated payment with idempotency support |
 | GET | `/api/v1/payments/{id}` | Owner or staff | Payment status, never sensitive instrument data |
 | GET | `/api/v1/payments/by-order/{orderId}` | Owner or staff | Payment status by order |
 | POST | `/api/v1/payments/{id}/refund` | ADMIN | Simulated refund |
@@ -121,15 +137,24 @@ Authorization is driven by `InventoryReserved` events.
 |---|---|---|---|
 | GET | `/api/v1/notifications?customerId={customerId}` | Owner/staff | Page simulated delivery records for one customer; `customerId` filter required, ownership verified via customer-service |
 | GET | `/api/v1/notifications/{id}` | Owner/staff | Delivery details |
+| PUT | `/api/v1/notifications/{id}/read` | Owner/staff | Mark a notification read |
+| GET | `/api/v1/notifications/templates` | ADMIN | List templates |
 
-Notification responses include `orderId` (nullable) after `customerId` for notifications produced from order/payment events; this is an additive field. Notifications are created from `PaymentCompleted`, `PaymentFailed`, `PaymentRefunded`, `PrescriptionVerified` and `PrescriptionRejected` events, with the order-to-customer mapping taken from `OrderCreated`. Email delivery is simulated locally (`NOTIFICATION_EMAIL_MODE=simulated`); set it to `smtp` to use a real mail server.
+Notification responses include nullable `orderId` for notifications produced
+from order/payment events. Notifications are created from implemented
+order/payment events, with the order-to-customer mapping taken from
+`OrderCreated`. Prescription handlers are wired, but prescription-service does
+not yet produce those events. Email delivery is simulated locally
+(`NOTIFICATION_EMAIL_MODE=simulated`); set it to `smtp` only with an explicitly
+configured mail server.
 
 ## Audit service
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/audit` | ADMIN | Search by aggregate/event/correlation/time |
-| GET | `/api/v1/audit/{id}` | ADMIN | Read sanitized entry |
+| GET | `/api/v1/audit/{aggregateId}` | ADMIN | Page an aggregate's audit trail |
+| GET | `/api/v1/audit/search` | ADMIN | Search by resource/action/user/service/time |
+| GET | `/api/v1/audit/compliance/report` | ADMIN | Summarize a resource type over a time range |
 
 ## External mock service control endpoints
 
@@ -137,10 +162,12 @@ These routes are local/test only and must not be exposed by production-like gate
 
 | Method | Route | Purpose |
 |---|---|---|
-| PUT | `/mock/config/prescription-verification` | Set SUCCESS/REJECT/DELAY/ERROR behavior |
-| PUT | `/mock/config/payment` | Set SUCCESS/FAIL/DELAY/ERROR behavior |
-| POST | `/mock/reset` | Restore defaults |
-| POST | `/mock/prescriptions/verify` | Endpoint called by prescription service |
+| PUT | `/api/v1/mock/prescription?mode={mode}&delayMs={ms}` | Set SUCCESS/REJECT/DELAY/ERROR behavior for the lab endpoint |
+| PUT | `/api/v1/mock/payment?mode={mode}&delayMs={ms}` | Set SUCCESS/REJECT/DELAY/ERROR behavior |
+| POST | `/api/v1/mock/reset` | Restore defaults |
+| POST | `/api/v1/mock/process-payment` | Endpoint called by payment-service |
+| GET | `/api/v1/mock/prescription` | Inspect the configured prescription lab response; not called by prescription-service |
+| GET | `/api/v1/mock/payment` | Inspect the configured payment lab response |
 
 ## Problem response example
 
@@ -156,4 +183,3 @@ These routes are local/test only and must not be exposed by production-like gate
   "timestamp": "2026-09-16T12:00:00Z"
 }
 ```
-

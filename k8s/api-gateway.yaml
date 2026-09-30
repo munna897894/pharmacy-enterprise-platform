@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api-gateway
-          image: docker.io/munna897/pharmacy-api-gateway:local-20260917-1
+          image: pharmacy/api-gateway:local
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -31,13 +31,18 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
               name: http
             - containerPort: 9081
               name: management
+          envFrom:
+            - configMapRef:
+                name: pharmacy-common
           env:
+            - name: LOGGING_FILE_NAME
+              value: /tmp/api-gateway.log
             - name: REDIS_HOST
               value: redis
             - name: REDIS_PORT

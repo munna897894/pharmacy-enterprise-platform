@@ -12,6 +12,7 @@ pharmacy-enterprise-platform/
 ├── prompts/
 ├── learning/
 ├── services/
+│   ├── api-gateway/
 │   ├── auth-service/
 │   ├── product-service/
 │   ├── customer-service/
@@ -23,10 +24,9 @@ pharmacy-enterprise-platform/
 │   ├── notification-service/
 │   ├── audit-service/
 │   └── external-mock-service/
-├── gateway/
-│   └── api-gateway/
 ├── platform/
 │   ├── event-contracts/
+│   ├── observability/
 │   └── test-support/
 ├── contracts/
 │   ├── openapi/
@@ -34,13 +34,16 @@ pharmacy-enterprise-platform/
 │   └── json-schema/
 ├── infra/
 │   ├── compose/
-│   ├── kafka/
-│   ├── mysql/
-│   ├── observability/
+│   ├── grafana/
+│   ├── local/
 │   ├── kubernetes/
+│   ├── k8s/
 │   ├── helm/
 │   ├── argocd/
+│   ├── prometheus/
 │   └── terraform/
+├── interview-guides/
+├── k8s/
 ├── postman/
 ├── scripts/
 ├── .env.example
@@ -91,12 +94,13 @@ Pragmatic simplification is allowed for a very small service, but controllers, p
 
 ## Configuration profiles
 
-Each application supports:
+Applications use `local` and `test` profiles where profile-specific behavior
+is required. Compose and Kubernetes primarily configure the same images through
+environment variables, ConfigMaps and mounted secret files rather than relying
+on mandatory `compose`/`k8s` Spring profiles. Non-local profiles enable
+structured JSON logging.
 
-- `local`: direct IntelliJ/Maven run with infrastructure on localhost
-- `compose`: Docker DNS names
-- `k8s`: Kubernetes service DNS and mounted configuration
-- `test`: isolated test configuration using Testcontainers or mocks
-
-Secrets must come from environment variables or mounted secrets. Commit only `.env.example`, never `.env`.
-
+Secrets must come from environment variables or mounted secrets. Commit only
+`.env.example`, never `.env`. Local Kubernetes secret material is generated
+from gitignored inputs; AWS workloads retrieve scoped values from Secrets
+Manager through IRSA-backed init containers.

@@ -1,5 +1,7 @@
 # Prompt 13 — Postman collection and final E2E automation
 
+> **Status (2026-09-30): Complete.** Current E2E prerequisites and execution guidance are in [the E2E runbook](../docs/e2e-runbook.md).
+
 ## Give Copilot these files
 
 - `docs/06-api-contracts.md`
@@ -46,4 +48,3 @@ Generate docs/e2e-runbook.md describing prerequisites, test order, expected even
 - Async polling is bounded.
 - Failures return non-zero in Newman/CI.
 - E2E run produces correlation IDs that can be followed in dashboards/logs.
-

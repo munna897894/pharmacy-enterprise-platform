@@ -1,0 +1,17 @@
+services:
+  # This replaces the baseline Collector configuration only when this override
+  # file is explicitly included. Tempo remains enabled while traces are fanned
+  # out to Dynatrace.
+  otel-collector:
+    command: ["--config=/etc/otelcol-commercial/config.yaml"]
+    environment:
+      DYNATRACE_OTLP_ENDPOINT: ${DYNATRACE_OTLP_ENDPOINT:?Set only when enabling the Dynatrace override}
+    volumes:
+      - ./otel-collector-dynatrace.yaml:/etc/otelcol-commercial/config.yaml:ro
+    secrets:
+      - source: dynatrace_api_token
+        target: dynatrace-api-token
+
+secrets:
+  dynatrace_api_token:
+    file: ${DYNATRACE_API_TOKEN_FILE:-../../.local/secrets/dynatrace-api-token}

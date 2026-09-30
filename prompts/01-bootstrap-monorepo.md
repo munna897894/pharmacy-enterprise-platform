@@ -1,12 +1,14 @@
 # Prompt 01 — Bootstrap and platform foundation (current state)
 
-This file reflects the live repository state after the monorepo bootstrap, service implementation, and runtime stabilization work. It is a current-state reference rather than the original task brief.
+> **Status (2026-09-30): Complete.** Current platform versions and deployment topology are authoritative in [architecture](../docs/02-architecture.md) and [local deployment](../docs/architecture-local.md); details below are a stage record.
+
+This file records the Prompt 01 implementation stage; the linked architecture docs, not this stage summary, define current platform state.
 
 ## Status
 
 Complete.
 
-The repo is a Java 21, Spring Boot 3.5.x, Spring Cloud 2025.0.x Maven monorepo with a shared parent, shared platform libraries, and a full service fleet. The root reactor builds as a coherent project and the local Kubernetes/Docker runtime has been aligned to the host-based dependency model used in this environment.
+The repo is a Java 21, Spring Boot 3.5.16, Spring Cloud 2025.0.3 Maven monorepo with a shared parent, shared platform libraries, and a full service fleet. The root reactor builds as a coherent project. In the canonical full-fleet local Kubernetes deployment, MySQL and Kafka run on the host; Redis and the external mock run in the cluster. Docker Compose is a legacy alternative. See [local deployment](../docs/architecture-local.md).
 
 ## What was implemented
 
@@ -53,10 +55,11 @@ The repo is a Java 21, Spring Boot 3.5.x, Spring Cloud 2025.0.x Maven monorepo w
 
 ## Current runtime model
 
-Local development and the Docker/Kubernetes local environment are intentionally not using an in-cluster MySQL/Kafka dependency model. Instead:
+For the canonical full-fleet local Kubernetes environment:
 
-- app containers reach host services via `host.docker.internal`
-- Redis remains local-cluster hosted for the Kubernetes runtime
+- application pods reach host MySQL and Kafka through the configured host endpoint
+- Redis and the external mock service run in the cluster
+- the original Compose path remains available as a legacy alternative, not the canonical Kubernetes deployment
 - image tags are registry-backed and refreshed after rebuilds
 - stale deployments, ReplicaSets, and outdated config values have been cleaned up to keep the platform consistent
 
@@ -68,5 +71,4 @@ Local development and the Docker/Kubernetes local environment are intentionally 
 
 ## Practical guidance
 
-Use this document as the current project baseline. The earlier bootstrap brief is a historical artifact; the live repo is the source of truth for what is implemented today.
-
+Use the linked canonical docs and live repository for current state. This file is a stage record, not a replacement for the original bootstrap requirements.

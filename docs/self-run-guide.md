@@ -1,65 +1,179 @@
-# Self-run guide: local stack and AWS sandbox
+# Self-run guide: Docker Desktop Kubernetes and AWS sandbox
 
-This guide shows how to start, test and stop the platform on your own machine.
+This guide shows how to deploy, test and stop the full platform on Docker
+Desktop Kubernetes, and separately how to operate the temporary full-fleet AWS sandbox.
 
-## Deployment topology (hybrid)
+Architecture diagrams: [local Docker Desktop Kubernetes](architecture-local.md)
+and [temporary AWS EKS sandbox](architecture-cloud.md).
+
+## Deployment topology (independent environments)
 
 | Where | What runs | Entry point |
 |---|---|---|
-| Local (Docker Compose) | All 11 business services + external-mock, Kafka, MySQL, Redis, Prometheus, Grafana, Loki, Tempo, Alloy, OTel Collector | `http://localhost:8080` |
-| AWS sandbox (EKS) | **Only** auth-service, api-gateway, product-service + a Redis pod, RDS MySQL, ALB | ALB hostname printed by `scripts/aws-smoke-test.sh` |
+| Local (Docker Desktop Kubernetes) | All 10 business services, API gateway, external mock and Redis in namespace `pharmacy`; MySQL and Kafka run natively on the host | `http://localhost:18080` via `kubectl port-forward` |
+| AWS sandbox (EKS) | All 12 JVM workloads, Redis, single-broker Kafka and observability in EKS; ten isolated schemas on private RDS | Private port-forward by default; optional HTTPS-only, `/32`-restricted gateway ALB with an ACM certificate |
 
-The AWS slice is self-contained: its gateway routes only to auth and product,
-with no Kafka and no calls back to local services. The order saga
-(customer, pharmacy, inventory, prescription, order, payment, notification,
-audit) runs only locally.
+**These are independent deployments, not a hybrid application.** Each has
+its own gateway, business services, Redis, database and Kafka; neither
+environment calls the other. AWS resources are ephemeral and have not yet
+been live-tested with the current credentials.
 
 ---
 
-## Part A — Local stack
+## Part A — Docker Desktop Kubernetes (full local platform)
 
 ### A1. Prerequisites
 
-- Docker Desktop with at least 8 GB RAM allocated.
+- Docker Desktop Kubernetes enabled, with enough memory for 12 JVM workloads
+  plus Redis and host-installed MySQL/Kafka (start with at least 12 GB).
+- `kubectl` connected to the `docker-desktop` context; Docker Desktop's
+  Kubernetes must use the same local Docker image store as your `docker` CLI.
+- Host-installed MySQL 8.4 (`brew install mysql@8.4` on macOS) and Kafka
+  4.x in KRaft mode, Docker CLI, curl and Java 21/Maven Wrapper for local
+  builds. MySQL and Kafka must not bind only to an address unavailable to
+  Docker Desktop pods. The MySQL scripts use the explicit keg-only 8.4 binary,
+  not whichever `mysql` happens to be first on `PATH`.
 - `python3` (used by scripts for JSON parsing).
 - Node.js + Newman: `npm install -g newman` (or let `scripts/newman.sh` use `npx`).
 
-### A2. One-time setup
+### A2. Check your context and prepare host dependencies
 
 ```bash
-cp .env.example .env
-# Edit .env: set every *_PASSWORD value and a unique GRAFANA_ADMIN_PASSWORD.
+kubectl config current-context           # must say docker-desktop
+docker context show                       # typically desktop-linux
+if [ ! -f .env ]; then cp .env.example .env; fi
+"$(brew --prefix mysql@8.4)/bin/mysql" --version
+kafka-topics --version
 ```
 
-`.env` is gitignored. Never commit it.
-
-### A3. Start everything
+If the old Compose fleet is still running, stop it before starting the
+Kubernetes copy to free Docker Desktop memory. This preserves Compose volumes
+and does not remove its data:
 
 ```bash
-docker compose \
-  -f infra/compose/compose.yml \
-  -f infra/compose/compose-observability.yml \
-  --env-file .env up -d --build
-
-# Wait ~90 seconds for Spring Boot services to start, then:
-docker compose -f infra/compose/compose.yml -f infra/compose/compose-observability.yml \
-  --env-file .env ps
+docker compose --env-file .env -f infra/compose/compose.yml \
+  -f infra/compose/compose-observability.yml stop
 ```
 
-### A4. Health checks
+Use the project-scoped native MySQL 8.4 instance on port `3308`, separate from
+your existing host server on `3306` and the Compose server on `3307`. It binds
+only to `127.0.0.1`; Docker Desktop's host gateway can reach it without making
+it available on your external network. Initialize the ten isolated service
+schemas and users before deploying the application:
+
+Do not run the Homebrew default MySQL service for this guide; use the
+project-scoped initialization/start scripts, which keep their state under the
+gitignored `.local/` directory instead of Homebrew's default data directory.
 
 ```bash
-./scripts/smoke-test.sh     # every service /actuator/health + gateway -> JWKS
-./scripts/event-smoke.sh    # every Kafka topic (+ .retry/.dlt) exists
+sh scripts/local-mysql-init.sh
+sh scripts/local-mysql-verify.sh
 ```
 
-Both must print `PASSED`. If a service fails right after startup, wait 30 s
-and rerun.
+The local initialization defaults to the **same `.env.example` values** as the
+local Kubernetes Secret below; rerunning it preserves data and checks that
+each of the ten schema-scoped users can access only its own schema. MySQL's
+random local root password is stored in `.local/mysql/admin.cnf` (owner-only).
+Keep that file if you intend to retain the local database; it is never
+committed or printed. To use custom DB passwords instead, add every
+`*_DB_PASSWORD` (including `NOTIFICATION_DB_PASSWORD`) to your gitignored
+`.env`, then run `K8S_ENV_FILE=.env sh scripts/local-mysql-init.sh` and create
+the Kubernetes Secret with the **same** `K8S_ENV_FILE=.env`. The example's
+`MYSQL_PORT=3307` is for legacy Compose; the Kubernetes chart uses `3308`.
+
+In a separate terminal, run `sh scripts/local-kafka-start.sh` from the repository
+root and leave it running. The script formats a **separate** single-node KRaft
+data directory at `.local/kafka-data` on first use; it does not modify any
+existing host broker or Compose broker. Kafka uses the host-only listener
+`localhost:19092` and advertises `host.docker.internal:29092` to pods as set
+in `infra/local/kafka/server.properties`. Both listeners bind only to host
+loopback; Docker Desktop forwards pod-to-host connections to the external
+listener. Keep this unencrypted local-only broker off public networks.
+Initialize and verify event, retry and DLT topics:
+
+```bash
+sh scripts/local-kafka-init.sh
+kafka-topics --bootstrap-server localhost:19092 --list
+```
+
+The pods use `host.docker.internal:3308` for MySQL and
+`host.docker.internal:29092` for Kafka. A running host Kafka with only a
+`localhost:19092` advertised endpoint is **not** sufficient for pods.
+Do not also start the legacy Compose application or backing services against
+these same ports and data.
+
+### A3. Build local images, create the local Secret and deploy
+
+If you need startup traces, install the private observability release in A7
+first, then return here to install the application chart.
+
+```bash
+set -e
+for svc in api-gateway auth-service product-service customer-service \
+  pharmacy-service inventory-service prescription-service order-service \
+  payment-service notification-service audit-service external-mock-service; do
+  docker build -t "pharmacy/$svc:local" -f "services/$svc/Dockerfile" .
+done
+
+kubectl apply -f k8s/namespace.yaml
+# Generates a local Secret with only the ten demo DB passwords and fixture RSA keys.
+# Use K8S_ENV_FILE=.env for separately provisioned custom local DB users.
+K8S_ENV_FILE=.env.example sh scripts/k8s-local-secret.sh
+
+./scripts/k8s-validate.sh
+helm upgrade --install pharmacy infra/helm/pharmacy-platform \
+  --kube-context docker-desktop \
+  --namespace pharmacy -f infra/helm/pharmacy-platform/values-local.yaml \
+  --wait --timeout 10m
+for svc in api-gateway auth-service product-service customer-service \
+  pharmacy-service inventory-service prescription-service order-service \
+  payment-service notification-service audit-service external-mock-service redis; do
+  kubectl -n pharmacy rollout status "deploy/$svc" --timeout=5m
+done
+kubectl -n pharmacy get deploy,svc,pods
+```
+
+Only use the checked-in RSA fixture keys for this local learning environment.
+`k8s/pharmacy-secrets.yaml` is an older, ignored local sample with fixed
+credentials and no RSA files; **do not apply it** and do not use
+`kubectl apply -f k8s/` to install the stack. The Helm chart is the deployment
+source; `scripts/k8s-validate.sh` checks its rendered resources. Docker
+Desktop uses local images
+tagged `pharmacy/<service>:local`; if a pod reports `ImagePullBackOff`, confirm
+`docker image inspect pharmacy/<service>:local` works in Docker Desktop's image
+store. If changing a service, rebuild its image, then run
+`kubectl -n pharmacy rollout restart deploy/<service>` to load it.
+
+### A4. Health checks and API access
+
+In a **second terminal**, leave this command running:
+
+```bash
+kubectl -n pharmacy port-forward svc/api-gateway 18080:8080
+```
+
+In the first terminal:
+
+```bash
+kubectl -n pharmacy get pods                  # all application pods should be Ready
+kubectl -n pharmacy get endpoints api-gateway auth-service product-service
+curl -fsS http://localhost:18080/api/v1/auth/.well-known/jwks.json
+```
+
+Check each service with `kubectl -n pharmacy rollout status deploy/<service>
+--timeout=5m` when troubleshooting. To inspect a health endpoint without
+exposing it through the gateway, port-forward that service (for example
+`kubectl -n pharmacy port-forward svc/order-service 18087:8087`, then curl
+`http://localhost:18087/actuator/health/readiness`). `scripts/smoke-test.sh`
+and `scripts/event-smoke.sh` are written for Compose, not Kubernetes.
 
 ### A5. Full automated E2E
 
+Stop the port-forward from A4 if it is still running; the test script opens its
+own temporary port-forward on port 18080.
+
 ```bash
-./scripts/e2e-test.sh       # smoke test, then the whole Postman collection via Newman
+sh scripts/local-k8s-test.sh
 ```
 
 Expect the Newman summary to show `0` failed assertions. It covers happy path,
@@ -69,11 +183,13 @@ cases. The first run after a fresh start can be slower.
 
 ### A6. Manual walkthrough (curl)
 
+For this separate walkthrough, restart the A4 gateway port-forward in its
+second terminal.
 Run these in one terminal session; each step reuses variables from the
 previous ones. Test users and data are fictional.
 
 ```bash
-BASE=http://localhost:8080
+BASE=http://localhost:18080
 json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 uuid() { uuidgen | tr 'A-Z' 'a-z'; }     # services expect lowercase UUIDs
 RUN=$(date +%s)
@@ -134,9 +250,10 @@ curl -fsS -X POST $BASE/api/v1/prescriptions/$PRESCRIPTION_ID/activate -H "Autho
 **5. Place an order (as customer) and watch the saga**
 
 ```bash
+ORDER_KEY=$(uuid)
 ORDER_ID=$(curl -fsS -X POST $BASE/api/v1/orders \
   -H "Authorization: Bearer $CUST_TOKEN" -H 'Content-Type: application/json' \
-  -H "Idempotency-Key: $(uuid)" \
+  -H "Idempotency-Key: $ORDER_KEY" \
   -d "{\"customerId\":\"$CUSTOMER_ID\",\"prescriptionId\":\"$PRESCRIPTION_ID\",\"pharmacyId\":\"$PHARMACY_ID\",\"currency\":\"USD\",\"total\":25.00,\"items\":[{\"medicationId\":\"$MED_ID\",\"quantity\":2,\"unitPrice\":12.50}]}" \
   | json '["id"]'); echo "order $ORDER_ID"
 
@@ -187,53 +304,76 @@ Other mock modes: `mode=DELAY&delayMs=2500` (slow but successful) and
 
 **8. Idempotency check**
 
-Repeat step 5's `POST /api/v1/orders` with the *same* `Idempotency-Key`
-value; the response returns the original order ID instead of a new order.
+Repeat step 5's `POST /api/v1/orders` with the *same* `$ORDER_KEY`
+and payload; the response returns the original order ID instead of a new order.
 
 ### A7. Observability
 
-| UI | URL | Login |
-|---|---|---|
-| Grafana | `http://localhost:3000` | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
-| Prometheus | `http://localhost:9090` | none (Status → Targets should be all UP) |
+Actuator health and Prometheus metrics remain internal to the cluster. For
+example, port-forward `svc/order-service` to inspect
+`http://localhost:18087/actuator/prometheus`. Search pod logs with
+`kubectl -n pharmacy logs deploy/order-service --since=10m` and send a valid
+`X-Correlation-ID` through the gateway to correlate requests.
 
-- Dashboard: Grafana → Dashboards → **Pharmacy Platform Observability**.
-- Logs: Explore → Loki → `{service_name="order-service"} |= "<correlation-id>"`.
-  Pass your own `-H "X-Correlation-ID: <uuid>"` on a request to search for it.
-- Traces: copy the trace ID (second value in `[correlationId,traceId,spanId]`
-  on a log line) → Explore → Tempo. One order shows as a single trace across
-  7 services.
-- Drills:
+The legacy Compose Grafana/Prometheus/Loki/Tempo overlay scrapes **Compose**
+service DNS, not Kubernetes pods. Use the dedicated Kubernetes observability
+release in `infra/helm/observability/` for the local cluster; the
+application chart's local values export traces to its in-cluster Collector.
+Access Grafana/Prometheus privately using the port-forward commands in
+`docs/11-observability.md`; do not expose their Services to the internet.
+Create a private Grafana admin Secret once before installing the observability
+release; the helper generates a unique password without printing it and
+preserves the Secret on reruns:
 
-  ```bash
-  ./scripts/resilience-lab.sh slow-payment 1500   # prints slowest spans of a slowed order
-  ./scripts/resilience-lab.sh hikari 45 120       # pool contention; prints Hikari metrics
-  ```
+```bash
+KUBE_CONTEXT=docker-desktop infra/helm/observability/scripts/ensure-grafana-secret.sh
+helm dependency build infra/helm/observability
+helm upgrade --install pharmacy-observability infra/helm/observability \
+  --kube-context docker-desktop --namespace pharmacy-observability \
+  -f infra/helm/observability/values-local.yaml --wait --timeout 10m
+```
 
-See `docs/11-observability.md` for details.
+To sign in as `admin`, retrieve the password locally with
+`kubectl --context docker-desktop -n pharmacy-observability get secret
+grafana-admin -o jsonpath='{.data.admin-password}' | base64 --decode`; do not
+paste it into logs or commit it. If this install predates the helper, your
+existing `.local/grafana-admin.env` also holds the password.
 
 ### A8. Stop, restart, reset
 
 ```bash
-# Stop (keeps all data volumes)
-docker compose -f infra/compose/compose.yml -f infra/compose/compose-observability.yml --env-file .env down
+# Pause just the Kubernetes application workloads; keeps MySQL/Kafka data.
+kubectl -n pharmacy scale deploy/api-gateway deploy/auth-service deploy/product-service \
+  deploy/customer-service deploy/pharmacy-service deploy/inventory-service \
+  deploy/prescription-service deploy/order-service deploy/payment-service \
+  deploy/notification-service deploy/audit-service deploy/external-mock-service \
+  deploy/redis --replicas=0
 
-# Rebuild and restart a single service after code changes
-docker compose -f infra/compose/compose.yml -f infra/compose/compose-observability.yml --env-file .env build order-service
-docker compose -f infra/compose/compose.yml -f infra/compose/compose-observability.yml --env-file .env up -d order-service
-
-# DESTRUCTIVE: delete all local application data volumes
-./scripts/reset-demo-data.sh --yes-i-know
+# Rebuild and restart a single service (after scaling it back to 1 if paused).
+docker build -t pharmacy/order-service:local -f services/order-service/Dockerfile .
+kubectl -n pharmacy scale deploy/order-service --replicas=1
+kubectl -n pharmacy rollout restart deploy/order-service
+kubectl -n pharmacy rollout status deploy/order-service --timeout=5m
 ```
+
+When finished, run `sh scripts/local-mysql-stop.sh` and interrupt the
+`local-kafka-start.sh` terminal; this preserves their local data. On restart,
+run `sh scripts/local-mysql-start.sh`,
+`sh scripts/local-mysql-verify.sh`, then restart Kafka. Do not delete the
+namespace or `.local/` unless you intend to discard local state.
 
 ### A9. Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Smoke test fails right after `up` | Services still starting; wait 30–60 s. `docker logs compose-<service>-1 --tail 100` |
+| Pod not Ready | `kubectl -n pharmacy describe pod -l app=<service>` and `kubectl -n pharmacy logs deploy/<service> --tail=100`; check backing MySQL/Kafka health. |
+| `ImagePullBackOff` | Build the image in Docker Desktop's image store; check the tag in `infra/helm/pharmacy-platform/values-local.yaml`. |
+| Kafka consumers cannot connect | Check the native broker's `DOCKER_DESKTOP` listener advertises `host.docker.internal:29092` and its firewall permits Docker Desktop. `localhost:19092` alone is not reachable from pods. |
+| MySQL access denied | The project-scoped MySQL instance must accept pod connections on port `3308`; users created by `scripts/local-mysql-init.sh` must match the generated Kubernetes Secret. |
+| JWKS/auth pod fails to start | Check the two fixture-key files exist and are mounted from the generated Secret at `/etc/auth/`. |
 | `curl` returns empty / 5xx on first call | Cold start; retry. |
 | `400 Invalid ... ID format` | Use lowercase UUIDs (`uuidgen \| tr 'A-Z' 'a-z'`). |
-| Order stays `INVENTORY_PENDING` | No stock for that pharmacy/medication, or Kafka unhealthy: `./scripts/event-smoke.sh`. |
+| Order stays `INVENTORY_PENDING` | Check inventory stock, Kafka health, `sh scripts/local-kafka-init.sh` and `kubectl -n pharmacy logs deploy/inventory-service`. |
 | `429 Too Many Requests` | Gateway rate limiting; slow down. |
 | Newman fails after many restarts | Rerun once; see "Known environment quirks" in `docs/e2e-runbook.md`. |
 
@@ -241,125 +381,96 @@ docker compose -f infra/compose/compose.yml -f infra/compose/compose-observabili
 
 ## Part B — AWS sandbox (billable)
 
-**Cost warning:** the EKS control plane, worker node, RDS instance and ALB
-bill every hour they exist (a few US dollars per day). Plan to destroy the
-same day. Budget alerts at $5/$10/$15/$20 are configured on the account.
+This is an **independent, disposable, non-production** copy of all 12 JVM
+workloads, Redis, private single-broker Kafka and open-source observability.
+It uses two public-subnet EKS workers, ten isolated RDS schemas/users and 12
+ECR repositories. Gateway access defaults to a private port-forward; a
+gateway-only HTTPS ALB is optional with an issued ACM certificate. No local host
+dependencies are reused. Only synthetic data is permitted. EKS, EC2, RDS,
+ALB, ECR, Secrets Manager, CloudWatch and storage can incur charges; budget
+alerts are not spending caps. Review a time-boxed estimate with
+`./scripts/aws-cost-estimate.sh 4` before planning; actual prices and usage
+may differ. Destroy the environment at the end of each
+session. Public-subnet workers and single-instance infrastructure are **not
+production-standard**.
 
-What gets deployed: 3 ECR repositories, 3 images (auth-service, api-gateway,
-product-service), VPC with public subnets (no NAT gateway), EKS with one
-`t3.small` node, RDS MySQL (private), Secrets Manager secrets, AWS Load
-Balancer Controller, and the manifests in `infra/k8s/sandbox/00-04`.
+### B1. Prepare and review
 
-### B1. Prerequisites
-
-- `aws` CLI, `terraform` (native arm64 binary in `~/bin/terraform` is preferred
-  on Apple Silicon; the scripts pick it up), `kubectl`, `helm`, Docker running.
-- AWS SSO profile `pharmacy-sandbox` configured (`aws configure sso`).
-
-### B2. Sign in and confirm the account
+Install Terraform, AWS CLI, Docker, `kubectl`, Helm, Python 3 and `curl`.
+Configure AWS SSO and sign in. Set `EXPECTED_AWS_ACCOUNT_ID` independently
+from an account you have confirmed, not from the current CLI profile. Set
+`OPERATOR_CIDR` to your current public IPv4 `/32` for EKS API access. Public
+registration currently accepts requested staff roles, so do not expose the
+gateway to untrusted clients. Review
+`docs/aws-plan-review.md` and `infra/terraform/README.md` for the full
+threat, resource and cost inventory. Bootstrap the encrypted remote-state
+bucket only if it does not already exist:
 
 ```bash
 export AWS_PROFILE=pharmacy-sandbox AWS_REGION=us-east-1
 aws sso login --profile pharmacy-sandbox
-aws sts get-caller-identity      # Account must be the sandbox account
+aws sts get-caller-identity
+export EXPECTED_AWS_ACCOUNT_ID='<independently-verified-12-digit-account-id>'
+export STATE_BUCKET='pharmacy-sandbox-tfstate-<account-id>'
+export NAME_PREFIX=pharmacy-sbx
+export OPERATOR_CIDR='<your-current-public-ip>/32'
+# Optional HTTPS ALB: issued ACM cert, DNS name it covers and explicit /32 list.
+# export GATEWAY_EXPOSURE=alb-https
+# export GATEWAY_CERTIFICATE_ARN='<issued-acm-certificate-arn>'
+# export GATEWAY_HOSTNAME='api.sandbox.example.com'
+# export ALB_INGRESS_CIDRS='<your-current-public-ip>/32'
+# First session only: export OWNER='<you>'; ./scripts/aws-bootstrap.sh
 ```
 
-### B3. Point at the Terraform state bucket
+Copy `infra/terraform/envs/sandbox/terraform.tfvars.example` to the
+gitignored `terraform.tfvars` in the same directory. Set `owner` and an
+upcoming `expiration`. The expiration tag is informational and will **not**
+destroy the environment automatically.
 
-The bucket was created once by `infra/terraform/bootstrap` (local state kept
-in that folder, gitignored).
+### B2. Validate, deploy and test
 
 ```bash
-export STATE_BUCKET=$(terraform -chdir=infra/terraform/bootstrap output -raw state_bucket_name)
-echo "$STATE_BUCKET"
+./scripts/aws-validate.sh
+./scripts/aws-plan.sh
+# Inspect the saved, sensitive plan locally before explicitly approving spend.
+./scripts/aws-apply.sh
+./scripts/aws-smoke-test.sh     # includes full Newman suite via private port-forward
+# Set RUN_NEWMAN=0 to run only the short smoke checks.
 ```
 
-If the bootstrap state is missing, follow "One-time: create the remote-state
-bucket" in `infra/terraform/README.md`.
+The apply script provisions the cluster, builds and pushes all twelve
+architecture-compatible images, creates credentials outside Terraform state,
+runs a temporary database-bootstrap Job to create all ten schemas/users, and
+deploys private Kafka, Redis, the complete JVM fleet and observability. No
+manual database password retrieval or SQL commands are required. Read the
+script's account, region, plan and cost review prompts before confirming.
+Keep Terraform state and plans private; they contain sensitive material.
 
-### B4. Review variables
+The default mode creates **no public ALB**. Authenticated smoke and Newman
+requests use `kubectl port-forward` through the authenticated EKS API.
+Optional `alb-https` requires an issued ACM certificate, matching hostname
+and explicit `/32` allowlist; it does not support an HTTP listener. Even in
+ALB mode, credentialed requests and Newman use the private port-forward; the
+ALB is checked with an unauthenticated HTTPS request only. The EKS
+observability release uses `infra/helm/observability/values-eks.yaml` plus a
+bounded AWS overlay; see `docs/11-observability.md` for port-forward access;
+monitoring Services must not be exposed through the ALB. AWS observability
+storage is ephemeral and loses history on pod/cluster restart.
 
-`infra/terraform/envs/sandbox/terraform.tfvars` (gitignored) must exist. If it
-doesn't, copy `terraform.tfvars.example`. Set `owner` and a real `expiration`
-date (the planned destroy date).
-
-### B5. Validate, plan, apply
+### B3. Destroy and audit leftovers
 
 ```bash
-./scripts/aws-validate.sh     # fmt/validate/security scan, no AWS changes
-./scripts/aws-plan.sh         # saves tfplan; READ the plan output
-./scripts/aws-apply.sh        # type 'apply' to confirm (takes ~15-20 min)
+./scripts/aws-destroy.sh
+./scripts/aws-post-destroy-check.sh
 ```
 
-`aws-apply.sh` applies Terraform, builds and pushes the 3 images to ECR,
-configures `kubectl`, then **pauses** before applying manifests.
-
-### B6. During the pause: create the service databases on RDS
-
-RDS is private, so connect from a temporary pod inside the cluster. In a
-**second terminal**:
-
-```bash
-export AWS_PROFILE=pharmacy-sandbox AWS_REGION=us-east-1
-cd infra/terraform/envs/sandbox
-RDS_HOST=$(terraform output -raw rds_endpoint | cut -d: -f1)
-
-# Passwords are read into variables; do not echo them.
-MASTER_PW=$(terraform output -raw rds_master_password)
-AUTH_PW=$(aws secretsmanager get-secret-value --secret-id pharmacy-sbx/auth-service/db-credentials \
-  --query SecretString --output text | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')
-PRODUCT_PW=$(aws secretsmanager get-secret-value --secret-id pharmacy-sbx/product-service/db-credentials \
-  --query SecretString --output text | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')
-
-kubectl run mysql-client -n pharmacy --rm -i --restart=Never --image=mysql:8.0 \
-  --env="MYSQL_PWD=$MASTER_PW" -- mysql -h "$RDS_HOST" -u admin_master <<SQL
-CREATE DATABASE IF NOT EXISTS auth_service;
-CREATE USER IF NOT EXISTS 'auth_user'@'%' IDENTIFIED BY '$AUTH_PW';
-GRANT ALL ON auth_service.* TO 'auth_user'@'%';
-CREATE DATABASE IF NOT EXISTS pharmacy_product;
-CREATE USER IF NOT EXISTS 'product_user'@'%' IDENTIFIED BY '$PRODUCT_PW';
-GRANT ALL ON pharmacy_product.* TO 'product_user'@'%';
-SQL
-
-unset MASTER_PW AUTH_PW PRODUCT_PW
-```
-
-(`pharmacy-sbx` is the default `name_prefix`; adjust if you changed it.)
-Then return to the first terminal and press **Enter**.
-
-### B7. Smoke test through the ALB
-
-```bash
-./scripts/aws-smoke-test.sh
-```
-
-It waits for the ALB hostname, then checks gateway health, JWKS, register +
-login, and a JWT-authenticated product read. Manual checks:
-
-```bash
-ALB=$(kubectl get ingress pharmacy-ingress -n pharmacy -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-curl -s http://$ALB/actuator/health                       # {"status":"UP"}
-curl -s http://$ALB/api/v1/auth/.well-known/jwks.json      # public key set
-kubectl get pods -n pharmacy
-kubectl logs -n pharmacy deploy/api-gateway --tail 50
-```
-
-Only `/api/v1/auth/**` and product routes work here. Order, inventory and the
-other saga endpoints are local-only.
-
-### B8. Tear down (mandatory)
-
-```bash
-./scripts/aws-destroy.sh               # re-verifies identity before destroying
-./scripts/aws-post-destroy-check.sh    # EKS/EC2/ELB/RDS/NAT/EIP/ECR lists must be empty
-```
-
-`aws-destroy.sh` asks you to type `destroy pharmacy-sandbox`, then `yes` to
-accept deleting RDS without a final snapshot.
-
-Afterward, check AWS Billing → Bills the next day for any unexpected charges.
-Do not destroy the bootstrap state bucket unless you're retiring the
-exercise entirely.
+Destroy removes the observability release/namespace and the application
+namespace (including the optional ALB) before tearing down Terraform
+resources including RDS and the Kafka gp3 volume
+without a final snapshot. Verify the inventory command completes cleanly
+and inspect AWS Billing for remaining charges. The separately bootstrapped
+state bucket is retained; remove it only when retiring the exercise and the
+sandbox state is empty.
 
 ## Related docs
 

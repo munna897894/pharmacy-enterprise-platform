@@ -13,9 +13,7 @@
 
 ### Tables
 
-- `app_user(id, username, email, password_hash, enabled, created_at, updated_at, version)`
-- `role(id, name)`
-- `user_role(user_id, role_id)`
+- `app_user(id, username, email, password_hash, first_name, last_name, roles, is_active, created_at, updated_at, last_login_at, version)`
 - `refresh_token(id, user_id, token_hash, expires_at, revoked_at, created_at)`
 
 ### Rules
@@ -58,38 +56,39 @@ Use fictional data. Do not log profile fields.
 
 ### Tables
 
-- `inventory_item(id, pharmacy_id, medication_id, on_hand, reserved, reorder_level, updated_at, version)`
-- `inventory_reservation(id, order_id, medication_id, pharmacy_id, quantity, status, expires_at, created_at, updated_at, version)`
-- `processed_event(event_id, consumer_name, processed_at)`
+- `stock_level(id, pharmacy_id, product_id, quantity_on_hand, reorder_level, reorder_quantity, status, created_at, updated_at, version)`
+- `stock_adjustment(id, stock_level_id, adjustment_type, quantity_adjusted, reason, adjusted_by, created_at)`
+- `inventory_reservation(id, order_id, pharmacy_id, status, items_json, created_at, updated_at)`
+- `processed_event(id, order_id, event_id, consumer_name, processed_at)`
 - `outbox_event(event_id, aggregate_type, aggregate_id, event_type, topic, event_key, payload, headers, occurred_at, published_at, attempts, last_error)`
 
 ### Invariants
 
-- `available = on_hand - reserved` and must never be negative.
-- The unique business reservation key is `(order_id, medication_id)`.
+- Stock quantity must never become negative.
+- The unique business reservation key is `order_id`; reservation line items
+  are stored as a serialized snapshot in `items_json`.
 - Replaying `OrderCreated` returns the existing reservation outcome.
 
 ### Reservation states
 
-`PENDING -> RESERVED -> RELEASED` or `PENDING -> REJECTED`; `RESERVED -> COMMITTED` after a completed payment.
+`RESERVED -> RELEASED` after payment failure or `RESERVED -> COMMITTED` after
+payment succeeds. A rejected reservation is emitted without persisting a
+successful hold.
 
 ## Prescription service
 
 ### Tables
 
-- `prescription(id, customer_id, prescriber_ref, medication_id, quantity, refills, instructions, status, submitted_at, verified_at, rejection_reason, version)`
-- `verification_attempt(id, prescription_id, external_reference, attempt_number, outcome, duration_ms, error_code, created_at)`
-- `outbox_event(...)`
+- `prescriptions(id, customer_id, prescriber_id, prescribed_at, expires_at, status, version, created_at, updated_at)`
+- `prescription_lines(id, prescription_id, product_id, quantity, instructions, dispensed_quantity, filled_at, created_at)`
 
 ### Status machine
 
-```text
-SUBMITTED -> VERIFYING -> VERIFIED
-                       -> REJECTED
-                       -> VERIFICATION_FAILED
-```
+`PENDING -> ACTIVE -> FILLED`; active prescriptions may also become `EXPIRED`.
 
-Only a `VERIFIED` prescription can be used to create an order.
+Only an `ACTIVE` prescription can be used to create an order. Prescription
+activation is currently an authorized application action; this service does
+not yet publish prescription lifecycle events.
 
 ## Order service
 
@@ -123,7 +122,8 @@ State transitions must be explicit and tested. Invalid transitions throw a domai
 
 ### Status machine
 
-`PENDING -> AUTHORIZED -> REFUNDED` or `PENDING -> FAILED`.
+`PENDING -> PROCESSING -> SUCCESS` or `PENDING -> PROCESSING -> FAILED`;
+successful payments may later become `REFUNDED`.
 
 No card number, CVV or real payment data is accepted or stored. Use a test payment token such as `tok_success` or `tok_fail`.
 
@@ -131,8 +131,11 @@ No card number, CVV or real payment data is accepted or stored. Use a test payme
 
 ### Tables
 
-- `notification(id, customer_id, order_id, channel, template_code, masked_destination, status, attempts, last_error, created_at, sent_at)`
+- `notifications(id, customer_id, type, channel, recipient, subject, message, status, sent_at, read_at, created_at, updated_at, retry_count)`
+- `notification_templates(id, type, channel, subject_template, message_template, is_active, created_at, updated_at)`
+- `order_customers(order_id, customer_id, created_at, updated_at)`
 - `processed_event(...)`
+- `notification_outbox(...)`
 
 Delivery is simulated and writes a structured log/record.
 
@@ -140,7 +143,8 @@ Delivery is simulated and writes a structured log/record.
 
 ### Tables
 
-- `audit_entry(id, event_id, event_type, aggregate_type, aggregate_id, actor_id, correlation_id, occurred_at, received_at, sanitized_payload)`
+- `audit_logs(id, aggregate_id, service, action, resource_type, user_id, username, timestamp, status, details, ip_address, created_at)`
+- `processed_events(event_id, processed_at)`
 
 Append only. Sanitize fields before storage. The audit service does not become the source of truth for business state.
 
@@ -156,3 +160,6 @@ In-memory control endpoints configure behavior:
 
 Reset behavior between scenarios.
 
+The Flyway migrations under each service are the executable schema source of
+truth. This document summarizes ownership and invariants; it does not replace
+those migrations.

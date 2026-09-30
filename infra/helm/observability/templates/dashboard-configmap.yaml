@@ -77,7 +77,7 @@ data:
           "title": "Structured logs (search correlationId / traceId)",
           "datasource": { "type": "loki", "uid": "loki" },
           "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
-          "targets": [{ "expr": "{namespace=\"pharmacy\"} | json", "queryType": "range", "refId": "A" }]
+          "targets": [{ "expr": "{namespace=\"pharmacy\"}", "queryType": "range", "refId": "A" }]
         },
         {
           "id": 9,

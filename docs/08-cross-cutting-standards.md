@@ -1,5 +1,10 @@
 # Cross-cutting standards
 
+This document is the platform standard. The
+[resilience matrix](generated-resilience-matrix.md) records what the current
+implementation actually wires; circuit-breaker and bulkhead items below remain
+target controls where the matrix does not list them.
+
 ## Correlation and trace context
 
 - Gateway accepts a valid `X-Correlation-ID` or creates a UUID.
@@ -93,4 +98,3 @@ Metrics must use low-cardinality tags such as service, endpoint template, status
 ## Configuration precedence
 
 Use `application.yml` defaults, profile YAML, then environment variables/secrets. Fail fast when mandatory configuration is absent. Document every variable in `.env.example` without real secret values.
-

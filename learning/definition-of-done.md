@@ -2,6 +2,12 @@
 
 Mark an item complete only with evidence (test report, command output, API response, dashboard, trace or Git commit).
 
+This is an acceptance **checklist**, not a claim that every box is already
+complete. The canonical local runtime is the full Docker Desktop Kubernetes
+fleet (`docs/self-run-guide.md`); Compose is a legacy full-fleet alternative.
+The current full-fleet AWS EKS design is prepared but has not been live-verified.
+Prompt 14 vendor hooks are disabled pending approved trials.
+
 ## Build and repository
 
 - [ ] Root Maven clean verify passes.
@@ -41,7 +47,10 @@ Mark an item complete only with evidence (test report, command output, API respo
 
 ## Containers and Kubernetes
 
-- [ ] Compose stack starts from documented steps.
+- [ ] Full local Kubernetes fleet starts from documented steps with native
+      project MySQL `3308` and Kafka host `19092` / pod `29092`.
+- [ ] If exercising legacy Compose, its separate full fleet starts without
+      conflicting with the Kubernetes/native dependency state.
 - [ ] Images use multi-stage builds and non-root runtime where practical.
 - [ ] Host and container Kafka listeners work.
 - [ ] Gateway is the only normal ingress.
@@ -69,12 +78,14 @@ Mark an item complete only with evidence (test report, command output, API respo
 - [ ] At least eight incident labs were attempted and four completed without immediate Copilot fixes.
 - [ ] Every completed incident has a short RCA.
 
-## AWS, if executed
+## AWS full-fleet sandbox, only if executed
 
 - [ ] Budget alerts configured before billable resources.
 - [ ] No MSK and no unapproved NAT Gateway.
 - [ ] Resources tagged with expiration/project metadata.
 - [ ] Terraform plan reviewed before apply.
+- [ ] Full-fleet EKS apply and smoke/Newman evidence captured (offline render
+      and the historical three-service AWS run do not satisfy this check).
 - [ ] Terraform destroy completed.
 - [ ] Post-destroy inventory confirms no unexpected EKS/EC2/ELB/RDS/NAT/EIP resources.
 
@@ -91,4 +102,3 @@ You can explain without reading notes:
 - [ ] how metrics, traces and logs combine during an incident;
 - [ ] CI build-to-image-to-deployment flow;
 - [ ] what AWS manages compared with the local stack.
-

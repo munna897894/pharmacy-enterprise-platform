@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: notification-service
-          image: docker.io/munna897/pharmacy-notification-service:local
+          image: pharmacy/notification-service:local
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -37,8 +37,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: pharmacy-common
-            - secretRef:
-                name: pharmacy-secrets
           env:
             - name: DB_HOST
               value: host.docker.internal

@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: auth-service
-          image: docker.io/munna897/pharmacy-auth-service:local
+          image: pharmacy/auth-service:local
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -31,14 +31,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: jwt-keys
+              mountPath: /etc/auth
+              readOnly: true
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8081
           envFrom:
             - configMapRef:
                 name: pharmacy-common
-            - secretRef:
-                name: pharmacy-secrets
           env:
             - name: DB_HOST
               value: host.docker.internal
@@ -66,6 +67,14 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: jwt-keys
+          secret:
+            secretName: pharmacy-secrets
+            items:
+              - key: private_key.pem
+                path: private_key.pem
+              - key: public_key.pem
+                path: public_key.pem
 ---
 apiVersion: v1
 kind: Service

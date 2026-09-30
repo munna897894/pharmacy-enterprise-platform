@@ -15,6 +15,7 @@ spec:
       labels:
         app: api-gateway
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -40,6 +41,8 @@ spec:
             - containerPort: 9081
               name: management
           env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=50 -XX:+UseG1GC"
             - name: AUTH_SERVICE_HOST
               value: "auth-service"
             - name: AUTH_SERVICE_PORT
@@ -50,8 +53,12 @@ spec:
               value: "6379"
             - name: ENVIRONMENT
               value: "aws"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://pharmacy-observability-opentelemetry-collector:4318/v1/traces"
+              value: "http://pharmacy-observability-opentelemetry-collector.pharmacy-observability.svc.cluster.local:4318/v1/traces"
+            - name: TRACING_SAMPLING_PROBABILITY
+              value: "1.0"
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -68,10 +75,10 @@ spec:
             failureThreshold: 5
           resources:
             requests:
-              cpu: 100m
-              memory: 384Mi
+              cpu: 75m
+              memory: 256Mi
             limits:
-              cpu: 500m
+              cpu: 400m
               memory: 512Mi
       volumes:
         - name: tmp
@@ -92,3 +99,6 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
+    - name: management
+      port: 9081
+      targetPort: 9081

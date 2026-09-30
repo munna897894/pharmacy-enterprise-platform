@@ -1,4 +1,8 @@
-# ✨ Quick Reference Guide
+# ✨ Quick Reference Guide — Historical Snapshot
+
+> **Historical snapshot — scope:** early platform overview through Prompt 03, before later workflow, deployment, and observability work. The original creation date is not preserved; this file was first committed/imported on 2026-09-28. Service ports, integrations, test counts, progress, and next steps below are not current. Use the [repository overview](README.md), [architecture](docs/02-architecture.md), [local deployment](docs/architecture-local.md), [API contracts](docs/06-api-contracts.md), and [event contracts](docs/07-event-contracts.md) for current facts.
+
+## Preserved historical content
 
 ## 🏗️ System Architecture At A Glance
 

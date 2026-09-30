@@ -1,5 +1,7 @@
 # Prompt 09 — Local Kubernetes and Helm (current state)
 
+> **Status (2026-09-30): Complete.** The canonical full-fleet local topology is host MySQL/Kafka plus in-cluster Redis/external-mock; the AWS sandbox is prepared but not live-verified. See [local](../docs/architecture-local.md) and [AWS](../docs/architecture-cloud.md) deployment guides.
+
 This file reflects the repository’s actual local Kubernetes setup and the operational fixes needed to make the fleet stable in a real local cluster environment.
 
 ## Status
@@ -15,13 +17,11 @@ The repo contains:
 
 ## Current local cluster model
 
-The local Kubernetes model is intentionally not a pure in-cluster MySQL/Kafka deployment. The platform was stabilized around a host-based local dependency model, with the following practical decisions:
+The canonical full-fleet local Kubernetes model is:
 
-- MySQL and Kafka are accessed from the cluster via host endpoints (for example `host.docker.internal`)
-- Redis remains local-cluster-backed for this runtime model
-- image tags are registry-based and refreshed after rebuilds
-- stale pods and ReplicaSets are cleaned up before rollout validation
-- each service is reduced to a single replica for local resource constraints unless a specific workload requires more
+- MySQL and Kafka run on the host and are reached through the configured host endpoint
+- Redis and the external mock service run in the cluster
+- Docker Compose remains a separate legacy alternative
 
 ## What is implemented in the repo
 
@@ -63,4 +63,3 @@ The repo’s working pattern is to keep the manifest layer and Helm values expli
 ## Final guidance
 
 This is the source-of-truth documentation for the current Kubernetes and Helm state. The original task brief is only historical context; the live manifests and configuration are what define the repo today.
-

@@ -1,5 +1,7 @@
 # Prompt 03 — Authentication and API Gateway (current state)
 
+> **Status (2026-09-30): Complete.** See the [gateway service guide](../services/api-gateway/README.md) and [local deployment](../docs/architecture-local.md) for current details.
+
 This prompt is aligned to the actual implementation that exists in the repo today.
 
 ## Status
@@ -46,7 +48,7 @@ Includes:
 
 ## Current runtime assumptions
 
-The local platform deliberately uses host-based service discovery for MySQL and Kafka during local execution, with Redis retained as a Kubernetes-local dependency in the local cluster setup.
+In the canonical full-fleet local Kubernetes deployment, MySQL and Kafka are host services, while Redis and the external mock run in the cluster. See [local deployment](../docs/architecture-local.md).
 
 The gateway and service configs are environment-driven rather than hard-coded to a single bootstrap environment. This was a critical fix during the local runtime stabilization pass.
 
@@ -63,4 +65,3 @@ The auth+gateway stack is expected to satisfy:
 - correlation IDs stay consistent across request and response
 - login bursts are rate-limited
 - health and auth endpoints remain accessible without unnecessary authentication
-

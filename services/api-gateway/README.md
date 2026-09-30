@@ -1,198 +1,74 @@
-# API Gateway Service
+# API Gateway
 
-The single entry point for all external HTTP traffic to the pharmacy-enterprise-platform. Handles JWT validation, rate limiting, correlation IDs, security headers, and request routing to backend microservices.
+The Spring Cloud Gateway WebFlux application is the public HTTP entry point.
+It listens on port `8080`; its management endpoints use the internal port
+`9081` by default. Current platform topology and public API behavior are
+defined in [`../../docs/02-architecture.md`](../../docs/02-architecture.md)
+and [`../../docs/06-api-contracts.md`](../../docs/06-api-contracts.md).
 
-## Features
+## Routes
 
-### 1. Request Routing
-- Routes all `/api/v1/**` requests to appropriate backend services
-- 10 backend service routes: auth, product, customer, pharmacy, inventory, prescription, order, payment, notification, audit
-- Path-based routing with intelligent method matching
+| Route | Upstream |
+|---|---|
+| `POST /api/v1/auth/login` | `auth-service:8081` |
+| `POST /api/v1/auth/register` | `auth-service:8081` |
+| `POST /api/v1/auth/refresh` | `auth-service:8081` |
+| `POST /api/v1/auth/logout` | `auth-service:8081` |
+| `GET /api/v1/auth/.well-known/jwks.json` | `auth-service:8081` |
+| `/api/v1/medications/**` (GET, POST, PUT, PATCH) | `product-service:8082` |
+| `/api/v1/customers/**` | `customer-service:8083` |
+| `/api/v1/pharmacies/**` | `pharmacy-service:8084` |
+| `/api/v1/inventory/**` | `inventory-service:8085` |
+| `/api/v1/prescriptions/**` | `prescription-service:8086` |
+| `/api/v1/orders/**` | `order-service:8087` |
+| `/api/v1/payments/**` | `payment-service:8088` |
+| `/api/v1/notifications/**` | `notification-service:8089` |
+| `GET /api/v1/audit/**` | `audit-service:8090` |
+| `/api/v1/mock/**` | `external-mock-service:8080` |
 
-### 2. JWT Validation
-- Validates JWT signatures using auth-service's RSA public key (JWKS)
-- Caches JWKS for 1 hour with automatic refresh on 401 responses
-- Extracts claims (sub, roles, exp, iat, jti) and passes to downstream services
-- Public endpoints bypass JWT check: login, register, refresh, JWKS
-- Private endpoints require valid JWT
+The mock route is for local/test failure controls and must not be exposed in a
+production-like gateway. Downstream services retain their own authorization.
 
-### 3. Correlation ID Propagation
-- Generates UUID if X-Correlation-ID not provided
-- Propagates to all downstream HTTP calls
-- Included in response headers for client tracing
-- Added to logs for request tracing
+## Request handling
 
-### 4. Security Headers
-- X-Content-Type-Options: nosniff
-- X-Frame-Options: DENY
-- X-XSS-Protection: 1; mode=block
-- Strict-Transport-Security: max-age=31536000; includeSubDomains
-- Content-Security-Policy: default-src 'self'
+- The custom JWT filter exempts login, registration, refresh and JWKS. Other
+  routes require a valid JWT Authorization header; the filter accepts RS256,
+  retrieves the matching public key from the auth-service JWKS endpoint,
+  verifies the signature and expiry, then forwards user/role/token
+  identifiers in `X-User-Id`, `X-User-Roles` and `X-Token-Jti` headers.
+- The correlation filter keeps a valid `X-Correlation-ID` or creates a UUID,
+  forwards it and adds it to the response on requests that reach that filter.
+- Redis rate limiting uses 60-second counters. Configured limits are 100 per
+  user and 1,000 per IP per minute. The rate-limit filter reads `userId` from
+  an exchange attribute, but the current JWT filter does not populate that
+  attribute; therefore the implemented limit is currently IP-scoped.
+  Redis errors fail open.
+- Configured connect and response timeouts are 30 seconds. The gateway
+  configuration does not define per-route retries or circuit-breaker filters.
+- CORS allows `http://localhost:3000` and `https://app.example.com`, the
+  configured REST methods, and the configured authorization/correlation/
+  idempotency headers. Security headers are added by the gateway filter.
 
-### 5. Rate Limiting (Redis-based)
-- Per-user rate limit: 100 requests/minute (by userId from JWT)
-- Per-IP rate limit: 1000 requests/minute (by client IP)
-- Token bucket algorithm with 1-minute sliding window
-- Returns 429 Too Many Requests with Retry-After header
-- Exempts public auth endpoints and actuator/health
+## Configuration and operations
 
-### 6. CORS Configuration
-- Allowed origins: http://localhost:3000, https://app.example.com
-- Allowed methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
-- Allowed headers: Content-Type, Authorization, X-Correlation-ID, X-Idempotency-Key
-- Credentials: true
-- Max age: 3600 seconds
+The main environment settings are `AUTH_SERVICE_HOST`,
+`AUTH_SERVICE_PORT`, `REDIS_HOST`, `REDIS_PORT`, `MANAGEMENT_SERVER_PORT`,
+`ENVIRONMENT`, `TRACING_SAMPLING_PROBABILITY` and
+`OTEL_EXPORTER_OTLP_ENDPOINT`. Kubernetes uses service DNS; local values are
+provided by the deployment configuration.
 
-### 7. Resilience
-- Timeout: 30 seconds connect, 30 seconds read
-- Retry: 2 retries for GET/HEAD/DELETE, 0 for POST/PUT/PATCH
-- Circuit breaker: Opens after 5 consecutive failures, half-opens after 10 seconds
-- Fallback responses with 503 Service Unavailable
+The application listens on `8080`. Health, info and Prometheus endpoints are
+served on the management port (`9081` by default); Kubernetes and Prometheus
+target that internal port. Other actuator endpoints are denied.
 
-### 8. Structured Logging
-- JSON logging in production profile
-- Includes correlationId, userId, response time, status code
-- Never logs Authorization header (tokens)
+## Build and test
 
-## Architecture
+Run from the repository root:
 
-```
-Client
-  |
-  v
-API Gateway (port 8080)
-  |
-  +-- JwtAuthenticationFilter (validates JWT signature)
-  +-- CorrelationIdFilter (generates/propagates correlation ID)
-  +-- SecurityHeaderFilter (adds security headers)
-  +-- RateLimitingFilter (checks rate limits via Redis)
-  +-- LoggingFilter (structured request/response logging)
-  |
-  v
-Route Dispatcher
-  |
-  +-- /api/v1/auth/** → auth-service:8081
-  +-- /api/v1/medications/** → product-service:8082
-  +-- /api/v1/customers/** → customer-service:8083
-  +-- /api/v1/pharmacies/** → pharmacy-service:8084
-  +-- /api/v1/inventory/** → inventory-service:8085
-  +-- /api/v1/prescriptions/** → prescription-service:8086
-  +-- /api/v1/orders/** → order-service:8087
-  +-- /api/v1/payments/** → payment-service:8088
-  +-- /api/v1/notifications/** → notification-service:8089
-  +-- /api/v1/audit/** → audit-service:8090
-```
-
-## Configuration
-
-### Environment Variables
-
-```
-REDIS_HOST=localhost (default)
-REDIS_PORT=6379 (default)
-AUTH_SERVICE_HOST=auth-service (default)
-AUTH_SERVICE_PORT=8081 (default)
-ENVIRONMENT=local (default)
-```
-
-### Application Properties
-
-```yaml
-spring:
-  data:
-    redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT}
-  cloud:
-    gateway:
-      server:
-        webflux:
-          metrics:
-            enabled: true
-
-auth-service:
-  jwks-uri: http://${AUTH_SERVICE_HOST}:${AUTH_SERVICE_PORT}/api/v1/auth/.well-known/jwks.json
-
-rate-limit:
-  per-user-per-minute: 100
-  per-ip-per-minute: 1000
-```
-
-## Testing
-
-### Unit Tests
-- JwtAuthenticationFilterTest: JWT validation, public endpoints
-- CorrelationIdFilterTest: ID generation, propagation
-- SecurityHeaderFilterTest: All security headers present
-- RateLimitingFilterTest: Rate limit logic
-
-### Run Tests
 ```bash
-./mvnw test -pl services/api-gateway
+./mvnw -pl services/api-gateway -am test
+./mvnw -pl services/api-gateway -am package
 ```
 
-### Build
-```bash
-./mvnw clean package -pl services/api-gateway
-```
-
-### Run
-```bash
-java -jar services/api-gateway/target/api-gateway-0.0.1-SNAPSHOT.jar
-```
-
-Or with Spring Boot Maven plugin:
-```bash
-./mvnw spring-boot:run -pl services/api-gateway
-```
-
-## Endpoints
-
-### Health/Actuator
-- GET /actuator/health - Application health (public)
-- GET /actuator/health/readiness - Readiness probe
-- GET /actuator/health/liveness - Liveness probe
-- GET /actuator/info - Application info
-- GET /actuator/prometheus - Prometheus metrics
-
-### Public Auth Routes
-- POST /api/v1/auth/login - User login
-- POST /api/v1/auth/register - User registration
-- POST /api/v1/auth/refresh - Token refresh
-- GET /api/v1/auth/.well-known/jwks.json - Public key distribution
-
-### Protected Routes (require JWT)
-All other `/api/v1/**` routes require valid JWT in Authorization header:
-```
-Authorization: Bearer <access_token>
-```
-
-## Metrics
-
-Exposed via Prometheus endpoint at `/actuator/prometheus`:
-- http_server_requests_seconds: Request latency
-- http_server_requests_seconds_count: Request count
-- http_server_requests_seconds_max: Max response time
-- spring_cloud_gateway_requests: Gateway request metrics
-- jvm_memory_used: JVM heap memory
-- jvm_gc_*: Garbage collection metrics
-
-## Dependencies
-
-- Spring Cloud Gateway (WebFlux)
-- Spring Security OAuth2 Resource Server
-- Spring Data Redis (Jedis)
-- Spring Cloud Resilience4j (Circuit Breaker)
-- JJWT (JWT parsing/validation)
-- Micrometer Prometheus Registry
-- OpenTelemetry (distributed tracing)
-
-## Notes
-
-- Gateway uses Kubernetes DNS for service discovery (e.g., http://auth-service:8081)
-- No business logic - thin gateway pattern
-- No database access from gateway
-- CORS and security headers protect browser clients
-- Rate limiting uses Redis to support multiple gateway instances
-- JWT validation includes signature, issuer, expiry checks
-- Every response includes X-Correlation-ID header
+The first command runs the current gateway test suite and required reactor
+dependencies. A green unit/slice test run is not a live-cluster smoke test.

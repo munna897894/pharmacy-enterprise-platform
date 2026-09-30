@@ -1,5 +1,12 @@
 # Kubernetes base learning manifests
 
+> **Learning slice, not the canonical local deployment.** These hand-written
+> manifests retain the original gateway/auth/product exercise. For the current
+> 12-workload Docker Desktop deployment, use
+> `infra/helm/pharmacy-platform/values-local.yaml`,
+> [`docs/self-run-guide.md`](../../../docs/self-run-guide.md), and the
+> [local architecture diagram](../../../docs/architecture-local.md).
+
 Apply the namespace, shared config, Redis, and the service slice:
 
 ```bash
@@ -39,11 +46,15 @@ separately generated, managed key pair. The default `runtime` auth image does
 not include test keys; only the local Compose `local` build target includes
 these fixtures.
 
-Local dependency expectations for this setup:
+Local dependency expectations for this isolated learning slice:
 
 - MySQL runs on your machine at `host.docker.internal:3306`
 - Kafka runs on your machine at `host.docker.internal:9092`
 - Redis stays in cluster
+
+These ports deliberately describe the original manually provisioned exercise,
+not the canonical project-scoped MySQL (`3308`) and Kafka (`29092` from pods)
+used by the full Helm deployment.
 
 Verify the slice with:
 

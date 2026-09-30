@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __SERVICE_NAME__
+  namespace: pharmacy
+  labels:
+    app: __SERVICE_NAME__
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: __SERVICE_NAME__
+  template:
+    metadata:
+      labels:
+        app: __SERVICE_NAME__
+    spec:
+      serviceAccountName: __SERVICE_NAME__
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: fetch-database-secret
+          image: amazon/aws-cli:2.17.0
+          env:
+            - name: HOME
+              value: /tmp
+            - name: AWS_REGION
+              value: __AWS_REGION__
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              trap 'rm -f /secrets/db_password.tmp' EXIT
+              aws secretsmanager get-secret-value --region "$AWS_REGION" \
+                --secret-id __DB_SECRET_ARN__ --query SecretString --output text \
+                > /secrets/db_password.tmp
+              chmod 600 /secrets/db_password.tmp
+              mv /secrets/db_password.tmp /secrets/db_password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /secrets
+      containers:
+        - name: __SERVICE_NAME__
+          image: __SERVICE_IMAGE__
+          command: ["/bin/sh", "-c"]
+          args:
+            - export DB_PASSWORD="$(cat /secrets/db_password)"; exec java -jar /app/app.jar
+          ports:
+            - name: http
+              containerPort: __SERVICE_PORT__
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=50 -XX:+UseG1GC"
+            - name: DB_HOST
+              value: "__RDS_ENDPOINT__"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_NAME
+              value: "__DB_SCHEMA__"
+            - name: DB_USER
+              value: "__DB_USER__"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: JWT_ISSUER
+              value: "http://auth-service:8081"
+            - name: JWT_ISSUER_URI
+              value: "http://auth-service:8081"
+            - name: JWT_AUDIENCE
+              value: "pharmacy-api"
+            - name: JWT_JWK_SET_URI
+              value: "http://auth-service:8081/api/v1/auth/.well-known/jwks.json"
+            - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
+              value: "http://auth-service:8081/api/v1/auth/.well-known/jwks.json"
+            - name: ENVIRONMENT
+              value: "aws"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://pharmacy-observability-opentelemetry-collector.pharmacy-observability.svc.cluster.local:4318/v1/traces"
+            - name: TRACING_SAMPLING_PROBABILITY
+              value: "1.0"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 75m
+              memory: 256Mi
+            limits:
+              cpu: 400m
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: secrets
+          emptyDir:
+            medium: Memory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: __SERVICE_NAME__
+  namespace: pharmacy
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /actuator/prometheus
+    prometheus.io/port: "__SERVICE_PORT__"
+spec:
+  type: ClusterIP
+  selector:
+    app: __SERVICE_NAME__
+  ports:
+    - name: http
+      port: __SERVICE_PORT__
+      targetPort: http

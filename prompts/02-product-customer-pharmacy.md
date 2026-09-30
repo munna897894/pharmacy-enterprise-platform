@@ -1,5 +1,7 @@
 # Prompt 02 — Product, customer and pharmacy services (current state)
 
+> **Status (2026-09-30): Complete.** Current architecture and deployment facts are in [architecture](../docs/02-architecture.md) and [local deployment](../docs/architecture-local.md); this file records the service-stage scope.
+
 This prompt now reflects the implemented service set and the actual business boundaries in the repository.
 
 ## Status
@@ -78,4 +80,3 @@ The service-level validation path still follows the same patterns introduced in 
 - validation failure handling without leaking internals
 - safe cache fallback and invalidation behavior
 - unauthorized access rejection with clear auth behavior
-

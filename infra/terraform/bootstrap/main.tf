@@ -46,6 +46,33 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "tf_state" {
   }
 }
 
+# Versioning is required for state recovery, but every historical state object
+# is a full copy of the state. Even after credentials were removed from state
+# (see modules/secrets/main.tf), noncurrent versions are the main place where
+# old state could linger, so they are expired automatically rather than kept
+# forever. This bounds retention; it does not replace the deliberate prune in
+# scripts/aws-prune-state-history.sh when retiring the exercise.
+resource "aws_s3_bucket_lifecycle_configuration" "tf_state" {
+  bucket = aws_s3_bucket.tf_state.id
+
+  rule {
+    id     = "expire-noncurrent-state"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.state_history_retention_days
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.tf_state]
+}
+
 resource "aws_s3_bucket_public_access_block" "tf_state" {
   bucket = aws_s3_bucket.tf_state.id
 

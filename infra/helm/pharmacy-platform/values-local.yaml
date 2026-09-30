@@ -1,24 +1,89 @@
 namespace: pharmacy
+imagePullPolicy: IfNotPresent
+defaultResources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    memory: 768Mi
 commonConfig:
+  SPRING_PROFILES_ACTIVE: local
+  DB_HOST: host.docker.internal
+  DB_PORT: "3308"
+  KAFKA_BOOTSTRAP_SERVERS: host.docker.internal:29092
   REDIS_HOST: redis
   REDIS_PORT: "6379"
-  KAFKA_BOOTSTRAP_SERVERS: host.docker.internal:9092
   AUTH_SERVICE_HOST: auth-service
   AUTH_SERVICE_PORT: "8081"
-  DB_HOST: host.docker.internal
-  DB_PORT: "3306"
-  AUTH_DB_NAME: auth_service
-  AUTH_DB_USER: auth_user
-  PRODUCT_DB_NAME: pharmacy_product
-  PRODUCT_DB_USER: product_user
+  INVENTORY_SERVICE_BASE_URL: http://inventory-service:8085
+  ORDER_SERVICE_BASE_URL: http://order-service:8087
+  PAYMENT_SERVICE_BASE_URL: http://payment-service:8088
+  CUSTOMER_SERVICE_BASE_URL: http://customer-service:8083
+  PAYMENT_GATEWAY_BASE_URL: http://external-mock-service:8080
+  NOTIFICATION_EMAIL_MODE: simulated
+  TRACING_SAMPLING_PROBABILITY: "1.0"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://pharmacy-observability-opentelemetry-collector.pharmacy-observability.svc.cluster.local:4318/v1/traces
+redis:
+  enabled: true
+  image: redis:7.4.11
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 services:
   api-gateway:
     image: pharmacy/api-gateway:local
     port: 8080
     managementPort: 9081
+    env:
+      LOGGING_FILE_NAME: /tmp/api-gateway.log
   auth-service:
     image: pharmacy/auth-service:local
     port: 8081
+    authKeys: pharmacy-secrets
+    db: {name: auth_service, user: auth_user, passwordKey: AUTH_DB_PASSWORD}
   product-service:
     image: pharmacy/product-service:local
-    port: 8081
+    port: 8082
+    env:
+      PRODUCT_SERVICE_PORT: "8082"
+    db: {name: pharmacy_product, user: product_user, passwordKey: PRODUCT_DB_PASSWORD}
+  customer-service:
+    image: pharmacy/customer-service:local
+    port: 8083
+    db: {name: pharmacy_customer, user: customer_user, passwordKey: CUSTOMER_DB_PASSWORD}
+  pharmacy-service:
+    image: pharmacy/pharmacy-service:local
+    port: 8084
+    db: {name: pharmacy_pharmacy, user: pharmacy_user, passwordKey: PHARMACY_DB_PASSWORD}
+  inventory-service:
+    image: pharmacy/inventory-service:local
+    port: 8085
+    db: {name: pharmacy_inventory, user: inventory_user, passwordKey: INVENTORY_DB_PASSWORD}
+  prescription-service:
+    image: pharmacy/prescription-service:local
+    port: 8086
+    db: {name: prescription_service, user: prescription_user, passwordKey: PRESCRIPTION_DB_PASSWORD}
+  order-service:
+    image: pharmacy/order-service:local
+    port: 8087
+    db: {name: pharmacy_order, user: order_user, passwordKey: ORDER_DB_PASSWORD}
+  payment-service:
+    image: pharmacy/payment-service:local
+    port: 8088
+    db: {name: pharmacy_payment, user: payment_user, passwordKey: PAYMENT_DB_PASSWORD}
+  notification-service:
+    image: pharmacy/notification-service:local
+    port: 8089
+    db: {name: pharmacy_notification, user: pharmacy_notification, passwordKey: NOTIFICATION_DB_PASSWORD}
+  audit-service:
+    image: pharmacy/audit-service:local
+    port: 8090
+    db: {name: pharmacy_audit, user: audit_user, passwordKey: AUDIT_DB_PASSWORD}
+  external-mock-service:
+    image: pharmacy/external-mock-service:local
+    port: 8080
+    env:
+      EXTERNAL_MOCK_SERVICE_PORT: "8080"

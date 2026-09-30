@@ -1,6 +1,8 @@
 # Prompt 08 — Docker Compose local platform (current state)
 
-This file reflects the local platform configuration now used by the repo, including the actual Docker/Compose runtime pattern and the fixed host-based dependency model.
+> **Status (2026-09-30): Complete.** Compose remains a legacy local alternative. The canonical full-fleet local Kubernetes topology uses host MySQL/Kafka and in-cluster Redis/external-mock; see [local deployment](../docs/architecture-local.md).
+
+This file records the Docker Compose stage and its host-based dependency pattern; it is not the source of truth for the current local Kubernetes deployment.
 
 ## Status
 
@@ -15,15 +17,11 @@ The repo contains:
 
 ## Current local platform model
 
-The local platform is intentionally configured around host-based services instead of in-cluster MySQL/Kafka for day-to-day local development.
+The Compose path is retained as a legacy alternative. Do not infer the canonical full-fleet Kubernetes topology from this Compose prompt.
 
-Expected local access pattern:
+When using this legacy Compose path, dependency addresses are environment-configured rather than hardcoded to one profile.
 
-- app containers reach MySQL and Kafka via `host.docker.internal`
-- Redis remains a local dependency for Kubernetes and selected local setups
-- service URLs are environment-configured rather than hardcoded to a single profile
-
-This is the actual runtime model that was stabilized after the earlier drift fixes; it is the source of truth for the repo’s current Docker operations.
+Compose-specific behavior is defined by the files under `infra/compose/`; the linked local deployment guide defines the canonical Kubernetes topology.
 
 ## Included platform components
 
@@ -54,5 +52,4 @@ The initial local platform assumptions were not fully valid in practice. The fol
 
 ## Repo reality
 
-The original prompt was a task definition. The actual repo behavior is the final authority: the platform is running in a host-aware dependency model rather than a purely internal “compose-only localhost” model.
-
+The Compose implementation is a retained local alternative. Use the linked deployment guide for current platform topology.

@@ -16,27 +16,25 @@ variable "security_group_id" {
 
 variable "instance_class" {
   type    = string
-  default = "db.t4g.micro"
+  default = "db.t4g.small"
 }
 
+# 20 GiB is the MySQL minimum. db.t4g.small (2 GiB) is retained rather than
+# db.t4g.micro (1 GiB): ten schemas with ten JDBC pools exceed the connection
+# and memory headroom a micro instance provides.
 variable "allocated_storage_gb" {
   type    = number
   default = 20
 }
 
 variable "master_username" {
-  type    = string
-  default = "admin_master"
+  type = string
 }
+
 
 variable "tags" {
   type    = map(string)
   default = {}
-}
-
-resource "random_password" "master" {
-  length  = 24
-  special = false
 }
 
 resource "aws_db_subnet_group" "this" {
@@ -45,20 +43,16 @@ resource "aws_db_subnet_group" "this" {
   tags       = var.tags
 }
 
-# Single small MySQL instance shared by auth-service and product-service, each
-# with its own schema and DB user created post-provisioning (see
-# scripts/aws-apply.sh step "create per-service schemas/users") — mirrors the
-# local one-schema/one-user-per-service rule; Multi-AZ is disabled and
-# deletion protection is disabled because this is a temporary, non-production
-# learning exercise (confirmed in docs/aws-plan-review.md section 13).
 resource "aws_db_instance" "this" {
   identifier     = "${var.name_prefix}-mysql"
   engine         = "mysql"
   engine_version = "8.0"
   instance_class = var.instance_class
 
-  allocated_storage     = var.allocated_storage_gb
-  max_allocated_storage = var.allocated_storage_gb * 2
+  allocated_storage = var.allocated_storage_gb
+  # Storage autoscaling is disabled so a runaway workload cannot silently grow
+  # billable storage; synthetic sandbox data never approaches 20 GiB.
+  max_allocated_storage = 0
   storage_type          = "gp3"
   storage_encrypted     = true
 
@@ -68,10 +62,14 @@ resource "aws_db_instance" "this" {
   publicly_accessible    = false
 
   username = var.master_username
-  password = random_password.master.result
-  port     = 3306
 
-  backup_retention_period = 0 # no automated backups — temporary exercise, no data worth restoring
+  # AWS generates, stores and owns the master password in Secrets Manager.
+  # Using a Terraform-generated password would persist it in plaintext in the
+  # versioned state bucket, where it would outlive `terraform destroy`.
+  manage_master_user_password = true
+  port                        = 3306
+
+  backup_retention_period = 0
   deletion_protection     = false
   skip_final_snapshot     = true
   apply_immediately       = true
@@ -87,11 +85,8 @@ output "port" {
   value = aws_db_instance.this.port
 }
 
-output "master_username" {
-  value = var.master_username
-}
-
-output "master_password" {
-  value     = random_password.master.result
-  sensitive = true
+# The AWS-managed secret holding the master credentials. Consumed by the
+# db-bootstrap Job's IAM policy; the value itself is never read by Terraform.
+output "master_user_secret_arn" {
+  value = aws_db_instance.this.master_user_secret[0].secret_arn
 }

@@ -37,11 +37,14 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -e
+              set -eu
+              umask 077
+              trap 'rm -f /secrets/db_password.tmp' EXIT
               aws secretsmanager get-secret-value --region __AWS_REGION__ \
                 --secret-id __PRODUCT_DB_SECRET_ARN__ --query SecretString --output text \
-                | tee /secrets/db.json
-              python -c "import json; d=json.load(open('/secrets/db.json')); open('/secrets/db_password','w').write(d['password'])"
+                > /secrets/db_password.tmp
+              chmod 600 /secrets/db_password.tmp
+              mv /secrets/db_password.tmp /secrets/db_password
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -61,6 +64,8 @@ spec:
           ports:
             - containerPort: 8082
           env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=50 -XX:+UseG1GC"
             - name: DB_HOST
               value: "__RDS_ENDPOINT__"
             - name: DB_PORT
@@ -77,10 +82,16 @@ spec:
               value: "http://auth-service:8081"
             - name: JWT_AUDIENCE
               value: "pharmacy-api"
+            - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
+              value: "http://auth-service:8081/api/v1/auth/.well-known/jwks.json"
             - name: ENVIRONMENT
               value: "aws"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://pharmacy-observability-opentelemetry-collector:4318/v1/traces"
+              value: "http://pharmacy-observability-opentelemetry-collector.pharmacy-observability.svc.cluster.local:4318/v1/traces"
+            - name: TRACING_SAMPLING_PROBABILITY
+              value: "1.0"
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -103,16 +114,17 @@ spec:
             failureThreshold: 5
           resources:
             requests:
-              cpu: 100m
-              memory: 384Mi
+              cpu: 75m
+              memory: 256Mi
             limits:
-              cpu: 500m
+              cpu: 400m
               memory: 512Mi
       volumes:
         - name: tmp
           emptyDir: {}
         - name: secrets
-          emptyDir: {}
+          emptyDir:
+            medium: Memory
 ---
 apiVersion: v1
 kind: Service

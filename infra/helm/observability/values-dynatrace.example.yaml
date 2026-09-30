@@ -1,0 +1,47 @@
+# Optional overlay. Supplying this file is the enablement action; the baseline
+# chart never references Dynatrace. Create the named Secret only during an
+# approved trial. Required keys: endpoint, api-token.
+opentelemetry-collector:
+  extraEnvs:
+    - name: DYNATRACE_OTLP_ENDPOINT
+      valueFrom:
+        secretKeyRef:
+          name: dynatrace-otlp
+          key: endpoint
+  extraVolumes:
+    - name: dynatrace-otlp
+      secret:
+        secretName: dynatrace-otlp
+        items:
+          - key: api-token
+            path: api-token
+  extraVolumeMounts:
+    - name: dynatrace-otlp
+      mountPath: /var/run/secrets/dynatrace
+      readOnly: true
+  config:
+    processors:
+      resource/commercial:
+        attributes:
+          - key: deployment.environment.name
+            value: pharmacy-eks-trial
+            action: upsert
+    exporters:
+      otlphttp/dynatrace:
+        endpoint: ${env:DYNATRACE_OTLP_ENDPOINT}
+        headers:
+          Authorization: "Api-Token ${file:/var/run/secrets/dynatrace/api-token}"
+        sending_queue:
+          enabled: true
+          queue_size: 1024
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 10s
+          max_elapsed_time: 60s
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource/commercial, batch]
+          exporters: [otlp/tempo, otlphttp/dynatrace]

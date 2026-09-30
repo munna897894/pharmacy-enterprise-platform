@@ -5,13 +5,34 @@ aws_profile = "pharmacy-sandbox"
 aws_region  = "us-east-1"
 name_prefix = "pharmacy-sbx"
 azs         = ["us-east-1a", "us-east-1b"]
+vpc_cidr    = "10.42.0.0/16"
+operator_cidr = "203.0.113.10/32" # replace with your current public IPv4 address
+
+# Gateway exposure. Default "port-forward" creates NO public load balancer;
+# reach the gateway with kubectl port-forward over the authenticated EKS API.
+# scripts/aws-plan.sh passes these from GATEWAY_EXPOSURE, GATEWAY_CERTIFICATE_ARN,
+# GATEWAY_HOSTNAME and ALB_INGRESS_CIDRS. Plain HTTP public exposure is not
+# supported: login credentials and JWTs must never travel in plaintext.
+gateway_exposure = "port-forward"
+# Only for gateway_exposure = "alb-https" (all three required, else empty):
+# gateway_certificate_arn = "arn:aws:acm:us-east-1:<account-id>:certificate/<id>" # ISSUED ACM cert
+# gateway_hostname        = "api.sandbox.example.dev" # covered by the cert; you create the CNAME
+# alb_ingress_cidrs       = ["203.0.113.10/32"]       # explicit /32s only
 
 owner       = "jagadeesh"
 environment = "sandbox-temp"
-expiration  = "2025-01-31" # update to your actual planned destroy date
+expiration  = "2026-10-05" # update to your actual planned destroy date
 
 cost_center = "learning-exercise"
 
-kubernetes_version  = "1.30"
-node_instance_type  = "t3.small"
-node_desired_size   = 1
+# Standard-support EKS versions only (1.34/1.35/1.36 as of 2026-09-30).
+# Older versions silently bill extended-support fees; re-verify before changing.
+kubernetes_version  = "1.35"
+# Graviton (arm64) is cheaper than the equivalent x86_64 type and matches an
+# Apple Silicon workstation, so images build natively instead of under
+# emulation. node_architecture and node_instance_type must agree; Terraform
+# rejects a mismatched pair. For x86_64 use "amd64" with "t3.large".
+node_architecture   = "arm64"
+node_instance_type  = "t4g.large"
+node_desired_size   = 2
+node_max_size       = 2

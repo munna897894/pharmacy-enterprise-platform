@@ -1,40 +1,46 @@
-# Audit Service Quick Start Guide
+# Audit Service Quick Start
 
-## Build & Test
+Run commands from the repository root. Java 21 and the Maven Wrapper are
+required.
+
+## Build and test
 
 ```bash
-# Compile the service
-mvn -pl services/audit-service clean compile
-
-# Run all tests
-mvn -pl services/audit-service test
-
-# Run specific test class
-mvn -pl services/audit-service -Dtest=AuditLogServiceTest test
-
-# Build package (without tests)
-mvn -pl services/audit-service clean package -DskipTests
-
-# Full build with tests
-mvn -pl services/audit-service clean package
+./mvnw -pl services/audit-service -am test
+./mvnw -pl services/audit-service -am verify
 ```
 
-## Running Locally
+The `test` phase runs Surefire tests, including `AuditServiceIntegrationTest`.
+That test class may skip its Testcontainers checks when Docker is unavailable.
+The audit-service POM does not bind Maven Failsafe goals to `verify`.
+
+## Run locally
+
+The application requires its configured MySQL schema and Kafka broker. Set
+the connection values through environment variables or use the repository's
+local deployment setup; do not place credentials in this guide or source
+control.
 
 ```bash
-# Start the service (requires Kafka, MySQL running)
-mvn -pl services/audit-service spring-boot:run
-
-# Or run the JAR directly
-java -jar services/audit-service/target/audit-service-0.0.1-SNAPSHOT.jar
+./mvnw -pl services/audit-service -am spring-boot:run
 ```
 
-## Database Setup
+The default application port is `8090`. Check health with:
 
 ```bash
-# Create MySQL schema and user
-mysql -u root -p << EOF
-CREATE SCHEMA audit_service;
-CREATE USER 'audit_user'@'%' IDENTIFIED BY 'password';
-GRANT ALL PRIVILEGES ON audit_service.* TO 'audit_user'@'%';
-FLUSH PRIVILEGES;
+curl --fail http://localhost:8090/actuator/health
+```
+
+## Configuration
+
+The service reads `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`,
+`KAFKA_BOOTSTRAP_SERVERS`, `JWT_ISSUER_URI`, `JWT_JWK_SET_URI`,
+`OTEL_EXPORTER_OTLP_ENDPOINT` and `TRACING_SAMPLING_PROBABILITY`. Defaults are
+defined in `src/main/resources/application.yml`. For the canonical full-fleet
+local Kubernetes topology, MySQL and Kafka are host services; Redis and the
+external mock service run in the cluster. The audit service does not require
+Redis.
+
+The API routes are ADMIN-only and use `/api/v1/audit`. See
+[`ARCHITECTURE.md`](ARCHITECTURE.md) for active topic bindings, DLT/retry
+settings, endpoint details and payload limitations.

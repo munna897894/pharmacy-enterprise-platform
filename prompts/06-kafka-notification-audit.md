@@ -1,5 +1,7 @@
 # Prompt 06 — Kafka, saga, notification and audit (current state)
 
+> **Status (2026-09-30): Complete.** The current event contract is [here](../docs/07-event-contracts.md); the audit service guide documents its active topic bindings and compatibility behavior.
+
 This prompt reflects the event-driven pieces that are now present in the repo: Kafka contracts, saga processing, notification consumers, and audit event ingestion.
 
 ## Status
@@ -57,7 +59,7 @@ Includes:
 
 ## Operational and runtime notes
 
-The platform’s real-world issue was not the conceptual saga approach; it was system drift in local configuration and deployment state. The event system had to be corrected to use a stable host-based local Kafka setup and consistent event-processing assumptions for K8s and Compose.
+For the canonical full-fleet local Kubernetes environment, Kafka and MySQL are host services; Redis and the external mock are in-cluster. Compose is a legacy alternative. See [local deployment](../docs/architecture-local.md).
 
 ## Current validation focus
 
@@ -66,4 +68,3 @@ The platform’s real-world issue was not the conceptual saga approach; it was s
 - consumer processing remains safe under replays and restarts
 - event metadata and correlation IDs are preserved for traceability
 - audit records remain append-only and sanitized
-

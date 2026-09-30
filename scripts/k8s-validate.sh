@@ -1,8 +1,13 @@
 #!/usr/bin/env sh
 set -eu
-kubectl apply --dry-run=client -f infra/kubernetes/base/namespace.yaml
-kubectl apply --dry-run=client -f infra/kubernetes/base/common-configmap.yaml
-kubectl apply --dry-run=client -f infra/kubernetes/base/common-secret.example.yaml
-kubectl apply --dry-run=client -f infra/kubernetes/base/api-gateway.yaml
-kubectl apply --dry-run=client -f infra/kubernetes/base/product-service.yaml
-kubectl apply --dry-run=client -f infra/kubernetes/base/auth-service.yaml
+
+if [ "$(kubectl config current-context)" != "docker-desktop" ]; then
+  echo "Expected Docker Desktop Kubernetes context; refusing to validate another cluster." >&2
+  exit 1
+fi
+
+helm lint infra/helm/pharmacy-platform \
+  -f infra/helm/pharmacy-platform/values-local.yaml
+helm template pharmacy infra/helm/pharmacy-platform --namespace pharmacy \
+  -f infra/helm/pharmacy-platform/values-local.yaml |
+  kubectl create --dry-run=client -f - -o name

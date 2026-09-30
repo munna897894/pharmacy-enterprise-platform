@@ -13,6 +13,13 @@
 
 Breaks are outside the six productive hours. If a day's acceptance criteria fail, finish that stage before starting unrelated work. Protect Days 14–15 for integration and troubleshooting.
 
+This is a **study sequence**, not a current implementation-status report. For
+present wiring use `interview-guides/full-system-architecture-map.md`. The
+canonical local run path is `docs/self-run-guide.md` (Docker Desktop Kubernetes
+full fleet, host-native MySQL `3308` and Kafka `19092`/`29092`); Compose is a
+legacy full-fleet alternative. The current full-fleet AWS sandbox is prepared
+but not live-verified, and Prompt 14 vendor hooks are disabled.
+
 ## Day 1 — Foundation and product service skeleton
 
 **Concepts:** IoC, dependency injection, beans, Maven, Boot auto-configuration, profiles, Actuator, controller/service/repository flow.
@@ -61,7 +68,9 @@ Breaks are outside the six productive hours. If a day's acceptance criteria fail
 
 **Execute:** finish Prompt 04C and its verification matrix, then apply the relevant HTTP/client portion of Prompt 07.
 
-**Failure lab:** delay, 500, rejection and recovery.
+**Failure lab:** use the external payment mock's delay/500/rejection modes for
+the running saga. External prescription verification remains an exercise, not
+a currently executable verification flow.
 
 **Finish with:** status/outbox consistency and resilience tests.
 
@@ -93,11 +102,15 @@ Breaks are outside the six productive hours. If a day's acceptance criteria fail
 
 **Concepts:** images, layers, containers, networks, volumes, listeners, non-root runtime, JVM memory.
 
-**Execute:** Prompt 08, then complete the platform-wide review in Prompt 07. Run end-to-end happy/negative paths inside Compose.
+**Execute:** Prompt 08, then complete the platform-wide review in Prompt 07. Run
+end-to-end happy/negative paths with `sh scripts/local-k8s-test.sh` on the
+canonical local fleet; study Compose as the legacy alternative.
 
 **Failure lab:** wrong DNS, bad port, dependency unavailable, container memory limit.
 
-**Finish with:** reproducible one-command local stack.
+**Finish with:** reproducible local Kubernetes fleet using
+`docs/self-run-guide.md`; native dependencies and the Helm release are
+separate startup steps, not a single Compose command.
 
 ## Day 11 — Kubernetes and Helm
 
@@ -107,15 +120,19 @@ Breaks are outside the six productive hours. If a day's acceptance criteria fail
 
 **Failure lab:** at least four mandatory Kubernetes failures today; complete remaining failures later.
 
-**Finish with:** gateway/auth/product/order slice on local Kubernetes and a rollback demonstration.
+**Finish with:** full local Kubernetes fleet (twelve JVM workloads plus Redis)
+and a rollback demonstration.
 
 ## Day 12 — Observability
 
 **Concepts:** RED/USE, metrics cardinality, traces/spans, async propagation, structured logs, alert triage.
 
-**Execute:** Prompts 10A and 10B. Treat 10C as documentation/setup only unless trials are already available.
+**Execute:** Prompts 10A and 10B using the separate local
+`pharmacy-observability` Helm release. Treat Prompt 14 Dynatrace/Splunk hooks
+as disabled preparation unless an approved trial is activated.
 
-**Failure lab:** slow prescription verification and DB connection pressure.
+**Failure lab:** slow payment via the external mock and DB connection pressure.
+Treat slow prescription verification as a future implementation exercise.
 
 **Finish with:** dashboard plus one end-to-end trace/correlated log trail.
 
@@ -131,9 +148,14 @@ Breaks are outside the six productive hours. If a day's acceptance criteria fail
 
 **First four hours:** execute Prompt 13 and fix integration gaps. Run all core E2E scenarios.
 
-**Final two hours:** study Prompt 12A AWS mapping/cost review. Only deploy approved AWS resources if local completion is already solid and budget protections are active. Otherwise keep AWS conceptual and use the time for Kubernetes/observability gaps.
+**Final two hours:** study the current full-fleet Prompt 12 AWS mapping, cost
+review and guarded lifecycle. Only deploy with fresh AWS SSO credentials,
+explicit billable approval and budget protections; offline validation is not
+a live smoke test.
 
-**Finish with:** repeatable E2E suite and an AWS create/destroy plan, not necessarily a running EKS cluster.
+**Finish with:** repeatable local E2E suite and an AWS create/destroy plan,
+not necessarily a running EKS cluster. Do not mark full-fleet AWS verified
+without live apply, smoke and post-destroy evidence.
 
 ## Day 15 — Production simulation and explanation
 

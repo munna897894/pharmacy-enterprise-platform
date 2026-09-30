@@ -1,0 +1,141 @@
+kube-prometheus-stack:
+  defaultRules:
+    rules:
+      alertmanager: false
+      etcd: false
+      kubeControllerManager: false
+      kubeProxy: false
+      kubeSchedulerAlerting: false
+      kubeSchedulerRecording: false
+      network: false
+      node: false
+      nodeExporterAlerting: false
+      nodeExporterRecording: false
+  alertmanager:
+    enabled: false
+  nodeExporter:
+    enabled: false
+  kubeControllerManager:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+  kubeProxy:
+    enabled: false
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 192Mi
+    admissionWebhooks:
+      patch:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+  kube-state-metrics:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 48Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  grafana:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 96Mi
+      limits:
+        cpu: 200m
+        memory: 320Mi
+    persistence:
+      storageClassName: hostpath
+  prometheus:
+    prometheusSpec:
+      retention: 2d
+      retentionSize: 2GB
+      resources:
+        requests:
+          cpu: 50m
+          memory: 192Mi
+        limits:
+          cpu: 400m
+          memory: 640Mi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: hostpath
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 3Gi
+
+loki:
+  loki:
+    limits_config:
+      retention_period: 48h
+  singleBinary:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 384Mi
+    persistence:
+      storageClass: hostpath
+      size: 3Gi
+
+tempo:
+  tempo:
+    retention: 24h
+    memBallastSizeMbs: 32
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 384Mi
+  persistence:
+    storageClassName: hostpath
+    size: 3Gi
+
+opentelemetry-collector:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  config:
+    processors:
+      memory_limiter:
+        limit_mib: 192
+        spike_limit_mib: 48
+        limit_percentage: null
+        spike_limit_percentage: null
+
+alloy:
+  clusterName: docker-desktop
+  alloy:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 192Mi
+
+kafkaExporter:
+  enabled: true
+  kafkaServer: host.docker.internal:29092

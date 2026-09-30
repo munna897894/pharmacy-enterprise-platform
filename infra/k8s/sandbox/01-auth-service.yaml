@@ -1,6 +1,5 @@
-# Placeholders (__UPPER_SNAKE__) are substituted by scripts/aws-apply.sh from
-# `terraform output` values before `kubectl apply` — never hand-edit committed
-# ARNs/endpoints/image URIs directly into this file.
+# AWS-specific values are rendered by scripts/aws-render-manifests.sh before
+# apply. Do not commit live ARNs, endpoints or image URIs in this manifest.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,21 +42,21 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -e
-              aws secretsmanager get-secret-value --region __AWS_REGION__ \
-                --secret-id __AUTH_DB_SECRET_ARN__ --query SecretString --output text \
-                | tee /secrets/db.json
-              aws secretsmanager get-secret-value --region __AWS_REGION__ \
-                --secret-id __JWT_KEYPAIR_SECRET_ARN__ --query SecretString --output text \
-                | tee /secrets/jwt.json
-              python - <<'PYEOF'
-              import json
-              db = json.load(open("/secrets/db.json"))
-              jwt = json.load(open("/secrets/jwt.json"))
-              open("/secrets/db_password", "w").write(db["password"])
-              open("/secrets/private_key.pem", "w").write(jwt["private_key_pem"])
-              open("/secrets/public_key.pem", "w").write(jwt["public_key_pem"])
-              PYEOF
+              set -eu
+              umask 077
+              trap 'rm -f /secrets/*.tmp' EXIT
+              fetch_secret() {
+                secret_arn="$1"
+                destination="$2"
+                aws secretsmanager get-secret-value --region __AWS_REGION__ \
+                  --secret-id "$secret_arn" --query SecretString --output text \
+                  > "${destination}.tmp"
+                chmod 600 "${destination}.tmp"
+                mv "${destination}.tmp" "$destination"
+              }
+              fetch_secret __AUTH_DB_SECRET_ARN__ /secrets/db_password
+              fetch_secret __JWT_PRIVATE_KEY_SECRET_ARN__ /secrets/private_key.pem
+              fetch_secret __JWT_PUBLIC_KEY_SECRET_ARN__ /secrets/public_key.pem
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -80,6 +79,8 @@ spec:
           ports:
             - containerPort: 8081
           env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=50 -XX:+UseG1GC"
             - name: DB_HOST
               value: "__RDS_ENDPOINT__"
             - name: DB_PORT
@@ -98,8 +99,12 @@ spec:
               value: "pharmacy-api"
             - name: ENVIRONMENT
               value: "aws"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://pharmacy-observability-opentelemetry-collector:4318/v1/traces"
+              value: "http://pharmacy-observability-opentelemetry-collector.pharmacy-observability.svc.cluster.local:4318/v1/traces"
+            - name: TRACING_SAMPLING_PROBABILITY
+              value: "1.0"
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -122,16 +127,17 @@ spec:
             failureThreshold: 5
           resources:
             requests:
-              cpu: 100m
-              memory: 384Mi
+              cpu: 75m
+              memory: 256Mi
             limits:
-              cpu: 500m
+              cpu: 400m
               memory: 512Mi
       volumes:
         - name: tmp
           emptyDir: {}
         - name: secrets
-          emptyDir: {}
+          emptyDir:
+            medium: Memory
 ---
 apiVersion: v1
 kind: Service

@@ -1,0 +1,94 @@
+# Explicit, idempotent bootstrap of the 15 event topics (5 domain topics plus
+# .retry and .dlt for each), mirroring scripts/local-kafka-init.sh. Broker
+# auto-creation is disabled in 06-kafka.yaml, so retry/DLT topics must exist
+# before any producer or DeadLetterPublishingRecoverer runs. Re-running is
+# safe: creation uses --if-not-exists and partition counts are only raised.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topic-bootstrap
+  namespace: pharmacy
+  labels:
+    app: kafka-topic-bootstrap
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: kafka-topic-bootstrap
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kafka-topics
+          image: apache/kafka:3.9.1
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: "kafka.pharmacy.svc.cluster.local:9092"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms64m -Xmx192m"
+            - name: LOG_DIR
+              value: "/tmp/kafka-logs"
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              topics_bin=/opt/kafka/bin/kafka-topics.sh
+              domain_topics="pharmacy.prescription.events.v1 pharmacy.order.events.v1 pharmacy.inventory.events.v1 pharmacy.payment.events.v1 pharmacy.notification.events.v1"
+              ensure_topic() {
+                "$topics_bin" --bootstrap-server "$BOOTSTRAP_SERVERS" --create --if-not-exists \
+                  --topic "$1" --partitions "$2" --replication-factor 1
+                current=$("$topics_bin" --bootstrap-server "$BOOTSTRAP_SERVERS" --describe --topic "$1" \
+                  | sed -n 's/.*PartitionCount:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n 1)
+                if [ -z "$current" ]; then
+                  echo "Could not read partition count for $1." >&2
+                  exit 1
+                fi
+                if [ "$current" -lt "$2" ]; then
+                  "$topics_bin" --bootstrap-server "$BOOTSTRAP_SERVERS" --alter --topic "$1" --partitions "$2"
+                fi
+              }
+              "$topics_bin" --bootstrap-server "$BOOTSTRAP_SERVERS" --list >/dev/null
+              for topic in $domain_topics; do
+                ensure_topic "$topic" 3
+                ensure_topic "$topic.retry" 1
+                ensure_topic "$topic.dlt" 1
+              done
+              existing=$("$topics_bin" --bootstrap-server "$BOOTSTRAP_SERVERS" --list)
+              count=0
+              for topic in $domain_topics; do
+                for suffix in "" ".retry" ".dlt"; do
+                  if ! printf '%s\n' "$existing" | grep -qx "$topic$suffix"; then
+                    echo "Missing Kafka topic $topic$suffix." >&2
+                    exit 1
+                  fi
+                  count=$((count + 1))
+                done
+              done
+              echo "All $count domain, retry and DLT topics are ready."
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

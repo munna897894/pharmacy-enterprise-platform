@@ -5,7 +5,7 @@
     <springProperty scope="context" name="serviceName" source="spring.application.name" defaultValue="api-gateway"/>
     <springProperty scope="context" name="environmentName" source="ENVIRONMENT" defaultValue="prod"/>
 
-    <springProfile name="!prod">
+    <springProfile name="local">
         <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
             <encoder>
                 <pattern>${LOG_PATTERN}</pattern>
@@ -30,7 +30,7 @@
         </appender>
     </springProfile>
 
-    <springProfile name="!prod">
+    <springProfile name="local">
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>

@@ -2,7 +2,7 @@
 
 ## Summary
 
-This area is **IMPLEMENTED and runtime-verified** against the local Compose stack. Every service exports Micrometer metrics to Prometheus, W3C trace context flows over HTTP and Kafka (including the transactional-outbox hops) into Tempo, container logs are shipped by Alloy to Loki with per-service labels, and Grafana provisions datasources plus the **Pharmacy Platform Observability** dashboard. Alert rules cover availability, 5xx rate, p95 latency, Hikari pressure, Kafka lag, DLT activity, outbox age, JVM heap and (on Kubernetes) restarts.
+This area is implemented for the canonical local Docker Desktop Kubernetes fleet, with observability in a separate `pharmacy-observability` namespace. Local Kubernetes run evidence is recorded in `docs/known-gaps.md`; the earlier Compose measurements below are **historical Compose lab evidence**, not a live AWS result. Services export Micrometer metrics; W3C trace context crosses HTTP and Kafka outbox hops into Tempo, Alloy ships logs to Loki, and Grafana provisions the **Pharmacy Platform Observability** dashboard. Rules cover availability, 5xx, p95 latency, Hikari pressure, Kafka lag, DLT, outbox age and heap.
 
 The most interview-worthy takeaways are the non-obvious fixes found only by running the stack: Kafka headers arriving as `byte[]`, the outbox relay breaking traces because the producer span was parented to the scheduler, and actuator endpoints silently returning 401 to Prometheus.
 
@@ -35,6 +35,7 @@ Client ──HTTP (+X-Correlation-ID)──► api-gateway :8080 (public)   actu
 | `infra/compose/prometheus.yml`, `infra/prometheus/alerts.yml` | Scrape config for all services (gateway via `api-gateway:9081`) and alert rules. |
 | `infra/compose/alloy.alloy` | Docker log discovery with relabeling to `service_name` and `container`. |
 | `infra/compose/otel-collector.yaml`, `tempo.yaml`, `loki.yaml` | Trace and log backends. |
+| `infra/helm/observability/values-local.yaml`, `docs/11-observability.md` | Canonical local Kubernetes observability release and private access. |
 | `infra/grafana/dashboards/overview.json` | RED, JVM, Hikari, Kafka lag, business-outcome and outbox panels. |
 | `scripts/resilience-lab.sh` | Reproducible slow-span and Hikari contention drills. |
 
@@ -100,7 +101,7 @@ A: Auto-instrumentation gives you generic HTTP/JVM/Kafka timings, but business m
 
 ## Trace-through
 
-**Verified locally with `./scripts/resilience-lab.sh slow-payment 1500`**
+**Historical Compose lab: `./scripts/resilience-lab.sh slow-payment 1500` (not AWS evidence)**
 
 1. The script sets the mock payment gateway to `DELAY 1500ms`, then posts an order through the gateway with its own `X-Correlation-ID`.
 2. order-service stores `OrderCreated` plus `traceparent`, baggage and correlation headers in its outbox; the relay restores that context and publishes.
@@ -108,6 +109,6 @@ A: Auto-instrumentation gives you generic HTTP/JVM/Kafka timings, but business m
 4. The order reaches `CONFIRMED`; notification and audit consume the payment events.
 5. The script finds the trace ID in Loki by correlation ID, then reads the trace from Tempo: **51 spans across 7 services**, slowest being `external-mock http post /api/v1/mock/process-payment` (~1.5 s) under `payment-service pharmacy.inventory.events.v1 receive`.
 
-**Hikari contention: `./scripts/resilience-lab.sh hikari 45 120`**
+**Historical Compose Hikari lab: `./scripts/resilience-lab.sh hikari 45 120`**
 
 - 120 workers for 45 s against order-service (~740 req/s, all 200) pushed `hikaricp_connections_pending` to 85 with 9–10 of 10 connections active and max acquire time ~360 ms. `HikariConnectionsPending` fires if this persists for 2 minutes.

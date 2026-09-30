@@ -1,5 +1,9 @@
 # 🎯 The Pharmacy Project - One Page Summary
 
+> **Historical snapshot — scope:** early project overview through Prompt 03, before the later service and platform work. The original creation date is not preserved; this file was first committed/imported on 2026-09-28. Progress, test counts, topology, and “what’s next” below are not current. Use the [repository overview](README.md), [architecture](docs/02-architecture.md), [local deployment](docs/architecture-local.md), [AWS sandbox status](docs/architecture-cloud.md), and [E2E runbook](docs/e2e-runbook.md) for current facts.
+
+## Preserved historical content
+
 ## What Are We Building?
 An online pharmacy where customers can order medicine, pay, and get notifications.
 **Like:** Uber + Stripe + Amazon, but for pharmacy
