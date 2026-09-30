@@ -25,6 +25,8 @@ import java.util.UUID;
 @Service
 @Transactional
 public class PaymentService {
+
+    private static final long KAFKA_SEND_TIMEOUT_MS = 10_000L;
     
     private final PaymentRepository paymentRepository;
     private final OutboxRepository outboxRepository;
@@ -174,7 +176,8 @@ public class PaymentService {
                 var capturedHeaders = readOutboxHeaders(event.getHeaders());
                 capturedHeaders.forEach((name, value) ->
                     record.headers().add(name, value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-                TraceContextHeaders.runInCapturedContext(capturedHeaders, () -> kafkaTemplate.send(record));
+                TraceContextHeaders.callInCapturedContext(capturedHeaders, () -> kafkaTemplate.send(record))
+                    .get(KAFKA_SEND_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
                 event.setPublished(true);
                 outboxRepository.save(event);
                 publishedCount++;

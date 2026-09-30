@@ -11,6 +11,8 @@ import org.slf4j.MDC;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 public final class TraceContextHeaders {
     private static final Set<String> ALLOWED_HEADERS = Set.of(
@@ -43,10 +45,24 @@ public final class TraceContextHeaders {
      * originating request's trace instead of the relay's scheduler.
      */
     public static void runInCapturedContext(Map<String, String> capturedHeaders, Runnable action) {
+        callInCapturedContext(capturedHeaders, () -> {
+            action.run();
+            return null;
+        });
+    }
+
+    /**
+     * Same continuation semantics as {@link #runInCapturedContext(Map, Runnable)} but returns the
+     * action's result, so callers can await a Kafka send future instead of discarding it.
+     */
+    public static <T> T callInCapturedContext(Map<String, String> capturedHeaders, Supplier<T> action) {
         Map<String, String> headers = capturedHeaders == null ? Map.of() : capturedHeaders;
         Context parent = PROPAGATOR.extract(Context.root(), headers, MAP_GETTER);
         try (Scope ignored = parent.makeCurrent()) {
-            CorrelationIdContext.runWithCorrelationId(headers.get(CorrelationIdContext.HEADER_NAME), action);
+            AtomicReference<T> result = new AtomicReference<>();
+            CorrelationIdContext.runWithCorrelationId(
+                headers.get(CorrelationIdContext.HEADER_NAME), () -> result.set(action.get()));
+            return result.get();
         }
     }
 

@@ -25,6 +25,8 @@ import java.util.UUID;
 @Service
 public class OrderService {
 
+    private static final long KAFKA_SEND_TIMEOUT_MS = 10_000L;
+
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final OutboxEventRepository outboxEventRepository;
@@ -369,7 +371,8 @@ public class OrderService {
                 var capturedHeaders = readOutboxHeaders(outboxEvent.getHeaders());
                 capturedHeaders.forEach((name, value) ->
                     record.headers().add(name, value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-                TraceContextHeaders.runInCapturedContext(capturedHeaders, () -> kafkaTemplate.send(record));
+                TraceContextHeaders.callInCapturedContext(capturedHeaders, () -> kafkaTemplate.send(record))
+                    .get(KAFKA_SEND_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
                 outboxEvent.recordPublishSuccess();
                 outboxEventRepository.save(outboxEvent);
                 publishedCount++;

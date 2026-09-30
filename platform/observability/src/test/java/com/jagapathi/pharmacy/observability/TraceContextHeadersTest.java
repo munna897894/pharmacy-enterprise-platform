@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TraceContextHeadersTest {
 
@@ -61,6 +62,30 @@ class TraceContextHeadersTest {
         assertThat(observedSpan.get().isRemote()).isTrue();
         assertThat(observedCorrelation.get()).isEqualTo(correlationId);
         assertThat(Span.current().getSpanContext().isValid()).isFalse();
+        assertThat(MDC.get("correlationId")).isNull();
+    }
+
+    @Test
+    void returnsActionResultFromCapturedContext() {
+        Map<String, String> captured = Map.of(
+            "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "X-Correlation-ID", "9b2d0a08-6f7a-4c4e-9f1f-0a2c4e8b7d31"
+        );
+
+        String result = TraceContextHeaders.callInCapturedContext(captured,
+            () -> Span.current().getSpanContext().getTraceId() + ":" + MDC.get("correlationId"));
+
+        assertThat(result)
+            .isEqualTo("4bf92f3577b34da6a3ce929d0e0e4736:9b2d0a08-6f7a-4c4e-9f1f-0a2c4e8b7d31");
+        assertThat(MDC.get("correlationId")).isNull();
+    }
+
+    @Test
+    void propagatesFailuresFromCallInCapturedContext() {
+        assertThatThrownBy(() -> TraceContextHeaders.callInCapturedContext(Map.of(), () -> {
+            throw new IllegalStateException("broker unavailable");
+        })).isInstanceOf(IllegalStateException.class).hasMessage("broker unavailable");
+
         assertThat(MDC.get("correlationId")).isNull();
     }
 

@@ -10,6 +10,7 @@ import com.jagapathi.pharmacy.order.infrastructure.*;
 import com.jagapathi.pharmacy.order.infrastructure.client.InventoryAvailabilityClient;
 import com.jagapathi.pharmacy.order.infrastructure.client.InventoryAvailabilityResponse;
 import com.jagapathi.pharmacy.order.infrastructure.event.*;
+import com.jagapathi.pharmacy.observability.OutboxMetricsSnapshot;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.BeforeEach;
@@ -291,5 +292,42 @@ class OrderServiceTest {
 
         assertThatThrownBy(() -> orderService.getOrderById(orderId))
             .isInstanceOf(OrderNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("Should leave outbox event unpublished when the Kafka send fails")
+    void testOutboxEventStaysUnpublishedWhenKafkaSendFails() {
+        OutboxEvent event = new OutboxEvent(UUID.randomUUID(), "Order", UUID.randomUUID(), "OrderCreated",
+            "pharmacy.order.events.v1", UUID.randomUUID().toString(), "{}", "{}");
+        when(outboxEventRepository.findByPublishedFalseOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        java.util.concurrent.CompletableFuture<org.springframework.kafka.support.SendResult<String, String>> failed =
+            new java.util.concurrent.CompletableFuture<>();
+        failed.completeExceptionally(new IllegalStateException("broker unavailable"));
+        when(kafkaTemplate.send(any(org.apache.kafka.clients.producer.ProducerRecord.class))).thenReturn(failed);
+
+        OutboxMetricsSnapshot snapshot = orderService.publishOutboxEvents();
+
+        assertThat(event.getPublished()).isFalse();
+        assertThat(event.getAttempts()).isEqualTo(1);
+        assertThat(event.getLastError()).isNotNull();
+        assertThat(snapshot.publishedCount()).isZero();
+        assertThat(snapshot.failedCount()).isEqualTo(1);
+        verify(outboxEventRepository).save(event);
+    }
+
+    @Test
+    @DisplayName("Should mark outbox event published only after the broker acknowledges")
+    void testOutboxEventPublishedAfterBrokerAck() {
+        OutboxEvent event = new OutboxEvent(UUID.randomUUID(), "Order", UUID.randomUUID(), "OrderCreated",
+            "pharmacy.order.events.v1", UUID.randomUUID().toString(), "{}", "{}");
+        when(outboxEventRepository.findByPublishedFalseOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        when(kafkaTemplate.send(any(org.apache.kafka.clients.producer.ProducerRecord.class)))
+            .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
+
+        OutboxMetricsSnapshot snapshot = orderService.publishOutboxEvents();
+
+        assertThat(event.getPublished()).isTrue();
+        assertThat(snapshot.publishedCount()).isEqualTo(1);
+        assertThat(snapshot.failedCount()).isZero();
     }
 }

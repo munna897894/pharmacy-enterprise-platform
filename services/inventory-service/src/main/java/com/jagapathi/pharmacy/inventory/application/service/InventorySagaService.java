@@ -34,6 +34,8 @@ import java.util.UUID;
 @Service
 public class InventorySagaService {
 
+    private static final long KAFKA_SEND_TIMEOUT_MS = 10_000L;
+
     private static final String INVENTORY_EVENTS_TOPIC = "pharmacy.inventory.events.v1";
     private static final String INVENTORY_ORDER_CREATED_CONSUMER = "inventory-order-created-v1";
     private static final String INVENTORY_PAYMENT_RESULT_CONSUMER = "inventory-payment-result-v1";
@@ -200,7 +202,8 @@ public class InventorySagaService {
                 var capturedHeaders = readOutboxHeaders(event.getHeaders());
                 capturedHeaders.forEach((name, value) ->
                     record.headers().add(name, value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-                TraceContextHeaders.runInCapturedContext(capturedHeaders, () -> kafkaTemplate.send(record));
+                TraceContextHeaders.callInCapturedContext(capturedHeaders, () -> kafkaTemplate.send(record))
+                    .get(KAFKA_SEND_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
                 event.recordPublishSuccess();
                 publishedCount++;
             } catch (Exception e) {
