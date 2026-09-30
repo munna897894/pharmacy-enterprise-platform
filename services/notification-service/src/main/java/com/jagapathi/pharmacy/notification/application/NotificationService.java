@@ -10,6 +10,7 @@ import com.jagapathi.pharmacy.notification.domain.*;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationRepository;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationTemplateRepository;
 import com.jagapathi.pharmacy.notification.infrastructure.channel.NotificationSender;
+import com.jagapathi.pharmacy.notification.infrastructure.messaging.NotificationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -25,13 +26,19 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final NotificationTemplateRepository templateRepository;
     private final List<NotificationSender> senders;
+    private final NotificationEventPublisher eventPublisher;
+    private final NotificationDeliveryFailureRecorder failureRecorder;
 
     public NotificationService(NotificationRepository notificationRepository,
                               NotificationTemplateRepository templateRepository,
-                              List<NotificationSender> senders) {
+                              List<NotificationSender> senders,
+                              NotificationEventPublisher eventPublisher,
+                              NotificationDeliveryFailureRecorder failureRecorder) {
         this.notificationRepository = notificationRepository;
         this.templateRepository = templateRepository;
         this.senders = senders;
+        this.eventPublisher = eventPublisher;
+        this.failureRecorder = failureRecorder;
     }
 
     public void sendNotification(UUID customerId, NotificationType type, List<Channel> channels,
@@ -63,10 +70,12 @@ public class NotificationService {
             sender.send(notification);
             notification.markAsSent();
             notificationRepository.save(notification);
+            eventPublisher.notificationSent(notification);
         } catch (Exception e) {
-            notification.markAsFailed();
-            notificationRepository.save(notification);
-            throw new RuntimeException("Failed to send notification", e);
+            // The caller's transaction rolls back so the Kafka consumer retries delivery, but the
+            // failed attempt and its NotificationFailed event must survive that rollback.
+            failureRecorder.recordDeliveryFailure(notification, e.getClass().getSimpleName());
+            throw new NotificationDeliveryException("Failed to send notification", e);
         }
     }
 

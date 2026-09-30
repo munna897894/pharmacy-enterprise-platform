@@ -21,6 +21,15 @@ spring:
       maximum-pool-size: 10
       minimum-idle: 2
       connection-timeout: 10000
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:host.docker.internal:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+    template:
+      observation-enabled: true
   cloud:
     function:
       definition: "orderEventConsumer;paymentEventConsumer;prescriptionEventConsumer"
@@ -36,20 +45,20 @@ spring:
               enableDlq: true
               dlqName: pharmacy.order.events.v1.dlt
               dlqPartitions: 1
-              # New groups begin at the log end instead of replaying history that predates the projection.
-              startOffset: latest
+              # New groups replay from the beginning; handlers are idempotent via processed_events.
+              startOffset: earliest
           paymentEventConsumer-in-0:
             consumer:
               enableDlq: true
               dlqName: pharmacy.payment.events.v1.dlt
               dlqPartitions: 1
-              startOffset: latest
+              startOffset: earliest
           prescriptionEventConsumer-in-0:
             consumer:
               enableDlq: true
               dlqName: pharmacy.prescription.events.v1.dlt
               dlqPartitions: 1
-              startOffset: latest
+              startOffset: earliest
       bindings:
         orderEventConsumer-in-0:
           destination: pharmacy.order.events.v1

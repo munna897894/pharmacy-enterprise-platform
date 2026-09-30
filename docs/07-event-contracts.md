@@ -101,6 +101,12 @@ Payload: `orderId`, `customerId`, `pharmacyId`, `readyAt`, `pickupCode`.
 
 Payload: `notificationId`, `orderId`, `customerId`, `channel`, `templateCode`, `status`, `occurredAt` and optional sanitized `failureCode`.
 
+Produced by notification-service through its own transactional outbox (`notification_outbox`),
+keyed on `notificationId`. `NotificationSent` commits with the SENT notification row. A delivery
+failure rolls the consuming transaction back so Kafka redelivers the source event, so the failed
+attempt and its `NotificationFailed` event are committed in an independent transaction; the
+`failureCode` carries only the sanitized exception type, never recipient or message content.
+
 ## Consumer groups
 
 Use a unique group per logical consumer, for example:

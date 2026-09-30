@@ -5,6 +5,7 @@ import com.jagapathi.pharmacy.notification.domain.*;
 import com.jagapathi.pharmacy.notification.infrastructure.channel.EmailSender;
 import com.jagapathi.pharmacy.notification.infrastructure.channel.InAppSender;
 import com.jagapathi.pharmacy.notification.infrastructure.channel.NotificationSender;
+import com.jagapathi.pharmacy.notification.infrastructure.messaging.NotificationEventPublisher;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationRepository;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationTemplateRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,13 +35,20 @@ class NotificationServiceTest {
     @Mock
     private InAppSender inAppSender;
 
+    @Mock
+    private NotificationEventPublisher eventPublisher;
+
+    @Mock
+    private NotificationDeliveryFailureRecorder failureRecorder;
+
     private NotificationService notificationService;
     private List<NotificationSender> senders;
 
     @BeforeEach
     void setUp() {
         senders = Arrays.asList(emailSender, inAppSender);
-        notificationService = new NotificationService(notificationRepository, templateRepository, senders);
+        notificationService = new NotificationService(notificationRepository, templateRepository, senders,
+            eventPublisher, failureRecorder);
     }
 
     @Test
@@ -149,5 +157,34 @@ class NotificationServiceTest {
 
         assertThat(templates).hasSize(2);
         verify(templateRepository).findByIsActiveTrue();
+    }
+
+    @Test
+    void publishesNotificationSentEventAfterSuccessfulDelivery() {
+        Notification notification = new Notification(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                NotificationType.ORDER_CONFIRMATION, Channel.EMAIL, "patient@example.com", "Confirmed", "Body");
+        when(emailSender.supports(Channel.EMAIL)).thenReturn(true);
+        when(notificationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        notificationService.publishNotification(notification, Channel.EMAIL);
+
+        assertThat(notification.getStatus()).isEqualTo(NotificationStatus.SENT);
+        verify(eventPublisher).notificationSent(notification);
+        verifyNoInteractions(failureRecorder);
+    }
+
+    @Test
+    void recordsDeliveryFailureOutsideTheRollingBackTransactionAndRethrows() throws Exception {
+        Notification notification = new Notification(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                NotificationType.ORDER_CONFIRMATION, Channel.EMAIL, "patient@example.com", "Confirmed", "Body");
+        when(emailSender.supports(Channel.EMAIL)).thenReturn(true);
+        doThrow(new IllegalStateException("smtp down")).when(emailSender).send(notification);
+
+        assertThatThrownBy(() -> notificationService.publishNotification(notification, Channel.EMAIL))
+                .isInstanceOf(NotificationDeliveryException.class);
+
+        verify(failureRecorder).recordDeliveryFailure(notification, "IllegalStateException");
+        verify(eventPublisher, never()).notificationSent(any());
+        verifyNoInteractions(notificationRepository);
     }
 }
