@@ -2,6 +2,9 @@ package com.jagapathi.pharmacy.gateway.filter;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtParser;
@@ -9,7 +12,6 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.SignatureException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -39,10 +41,14 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
     private final JwtService jwtService;
     private final ObjectMapper objectMapper;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
-    public JwtAuthenticationFilter(JwtService jwtService) {
+    public JwtAuthenticationFilter(JwtService jwtService, Tracer tracer, Propagator propagator) {
         this.jwtService = jwtService;
         this.objectMapper = new ObjectMapper();
+        this.tracer = tracer;
+        this.propagator = propagator;
     }
 
     @Override
@@ -69,7 +75,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
         String token = authHeader.substring(7);
 
-        return validateAndExtractClaims(token)
+        return validateWithObservation(token, request.getHeaders())
             .flatMap(claims -> {
                 String userId = claims.get("sub", String.class);
                 List<?> rawRoles = claims.get("roles", List.class);
@@ -88,15 +94,26 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                     .request(mutatedRequest)
                     .build();
 
-                MDC.put("userId", userId);
-
-                return chain.filter(mutatedExchange)
-                    .doFinally(signalType -> MDC.remove("userId"));
+                return chain.filter(mutatedExchange);
             })
             .onErrorResume(e -> {
                 logger.error("JWT validation failed for path: {}", path, e);
                 return unauthorizedResponse(exchange, "Invalid or expired token");
             });
+    }
+
+    private Mono<Claims> validateWithObservation(String token, HttpHeaders headers) {
+        return Mono.defer(() -> {
+            Span parent = tracer.currentSpan();
+            Span span = parent != null
+                ? tracer.nextSpan(parent).name("auth.jwt.validation").start()
+                : propagator.extract(headers, HttpHeaders::getFirst)
+                    .name("auth.jwt.validation").start();
+            return validateAndExtractClaims(token)
+                .doOnSuccess(claims -> span.tag("auth.outcome", "accepted"))
+                .doOnError(error -> span.tag("auth.outcome", "rejected"))
+                .doFinally(signal -> span.end());
+        });
     }
 
     private Mono<Claims> validateAndExtractClaims(String token) {

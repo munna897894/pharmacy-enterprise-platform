@@ -145,7 +145,7 @@ logging:
     root: INFO
     com.jagapathi.pharmacy: DEBUG
   pattern:
-    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} [%thread] %-5level %logger{36} [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] - %msg%n"
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} [%thread] %-5level %logger{36} [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] service=notification-service environment=${ENVIRONMENT:local} - %msg %kvp%n"
 
 ---
 spring:

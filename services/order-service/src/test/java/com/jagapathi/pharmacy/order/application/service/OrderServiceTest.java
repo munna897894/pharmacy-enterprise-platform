@@ -11,18 +11,28 @@ import com.jagapathi.pharmacy.order.infrastructure.client.InventoryAvailabilityC
 import com.jagapathi.pharmacy.order.infrastructure.client.InventoryAvailabilityResponse;
 import com.jagapathi.pharmacy.order.infrastructure.event.*;
 import com.jagapathi.pharmacy.observability.OutboxMetricsSnapshot;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.BeforeEach;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.slf4j.MDC;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -50,6 +60,7 @@ class OrderServiceTest {
 
     private OrderService orderService;
     private ObjectMapper objectMapper;
+    private List<String> observations;
 
     @BeforeEach
     void setUp() {
@@ -57,11 +68,20 @@ class OrderServiceTest {
         objectMapper = new ObjectMapper()
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        observations = new ArrayList<>();
+        ObservationRegistry observationRegistry = ObservationRegistry.create();
+        observationRegistry.observationConfig().observationHandler(new ObservationHandler<>() {
+            @Override
+            public boolean supportsContext(Observation.Context context) { return true; }
+
+            @Override
+            public void onStart(Observation.Context context) { observations.add(context.getName()); }
+        });
         when(inventoryAvailabilityClient.checkAvailability(any(), any(), any()))
             .thenReturn(new InventoryAvailabilityResponse(true, "available"));
         orderService = new OrderService(orderRepository, orderItemRepository, outboxEventRepository,
             processedEventRepository, statusHistoryRepository, kafkaTemplate, objectMapper, inventoryAvailabilityClient,
-            idempotencyRecordRepository);
+            idempotencyRecordRepository, observationRegistry);
     }
 
     @Test
@@ -91,11 +111,42 @@ class OrderServiceTest {
         });
         when(outboxEventRepository.save(any(OutboxEvent.class))).thenReturn(new OutboxEvent());
 
-        OrderResponse response = orderService.createOrder(request);
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(OrderService.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        String correlationId = UUID.randomUUID().toString();
+        String traceId = "0123456789abcdef0123456789abcdef";
+        String previousCorrelationId = MDC.get("correlationId");
+        String previousTraceId = MDC.get("traceId");
+        MDC.put("correlationId", correlationId);
+        MDC.put("traceId", traceId);
+        OrderResponse response;
+        try {
+            response = orderService.createOrder(request);
+        } finally {
+            restoreMdc("correlationId", previousCorrelationId);
+            restoreMdc("traceId", previousTraceId);
+            logger.detachAppender(appender);
+            appender.stop();
+        }
 
         assertThat(response).isNotNull();
         verify(orderRepository, times(2)).save(any(Order.class));
         verify(outboxEventRepository).save(any(OutboxEvent.class));
+        assertThat(observations).contains("order.database.order.save", "order.database.outbox.save");
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "order.lifecycle.created")
+                .containsEntry("orderId", response.getId())
+                .containsKey("eventId")
+                .doesNotContainKeys("customerId", "prescriptionId", "total", "items");
+            assertThat(event.getMDCPropertyMap())
+                .containsEntry("correlationId", correlationId)
+                .containsEntry("traceId", traceId);
+        });
     }
 
     @Test
@@ -232,6 +283,46 @@ class OrderServiceTest {
     }
 
     @Test
+    @DisplayName("Should log failed payment transition without payment details")
+    void testProcessPaymentFailedLogsSafeLifecycleFields() {
+        UUID orderId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        Order order = new Order(orderId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+            BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.valueOf(55.00), "USD");
+        order.transitionTo(OrderStatus.INVENTORY_PENDING);
+        order.transitionTo(OrderStatus.INVENTORY_RESERVED);
+        order.transitionTo(OrderStatus.PAYMENT_PENDING);
+
+        when(processedEventRepository.existsByOrderIdAndEventId(orderId, eventId)).thenReturn(false);
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(OrderService.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            orderService.processPaymentCompleted(
+                new PaymentProcessedEvent(eventId, orderId, "FAILED", Instant.now()));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED_PAYMENT);
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "order.lifecycle.transitioned")
+                .containsEntry("orderId", orderId)
+                .containsEntry("eventId", eventId)
+                .containsEntry("outcome", "failed")
+                .containsEntry("toStatus", OrderStatus.CANCELLED_PAYMENT)
+                .doesNotContainKeys("customerId", "paymentToken", "amount");
+        });
+    }
+
+    @Test
     @DisplayName("Should mark order ready for pickup")
     void testMarkOrderReadyForPickup() {
         UUID orderId = UUID.randomUUID();
@@ -329,5 +420,13 @@ class OrderServiceTest {
         assertThat(event.getPublished()).isTrue();
         assertThat(snapshot.publishedCount()).isEqualTo(1);
         assertThat(snapshot.failedCount()).isZero();
+    }
+
+    private static void restoreMdc(String key, String value) {
+        if (value == null) {
+            MDC.remove(key);
+        } else {
+            MDC.put(key, value);
+        }
     }
 }

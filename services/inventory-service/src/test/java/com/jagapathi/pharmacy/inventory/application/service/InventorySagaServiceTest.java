@@ -10,12 +10,15 @@ import com.jagapathi.pharmacy.inventory.domain.repository.StockLevelRepository;
 import com.jagapathi.pharmacy.inventory.infrastructure.OutboxEvent;
 import com.jagapathi.pharmacy.inventory.infrastructure.OutboxEventRepository;
 import com.jagapathi.pharmacy.inventory.infrastructure.ProcessedEventRepository;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 
 import java.math.BigDecimal;
@@ -23,6 +26,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -58,11 +63,30 @@ class InventorySagaServiceTest {
         when(reservationRepository.findByOrderId(orderId)).thenReturn(Optional.empty());
         when(stockLevelRepository.findByPharmacyIdAndProductId(PHARMACY_ID, PRODUCT_ID)).thenReturn(Optional.of(stock));
 
-        sagaService.handleOrderCreated(eventId, orderId, PHARMACY_ID,
-            List.of(new ReservationItem(PRODUCT_ID, BigDecimal.valueOf(5))), Instant.now());
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(InventorySagaService.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            sagaService.handleOrderCreated(eventId, orderId, PHARMACY_ID,
+                List.of(new ReservationItem(PRODUCT_ID, BigDecimal.valueOf(5))), Instant.now());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
 
         assertThat(stock.getQuantityOnHand()).isEqualByComparingTo(BigDecimal.valueOf(95));
         verify(reservationRepository).save(any(InventoryReservation.class));
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "inventory.reservation.completed")
+                .containsEntry("orderId", orderId)
+                .containsEntry("eventId", eventId)
+                .containsKey("resultEventId")
+                .doesNotContainKeys("productId", "quantity", "pharmacyId");
+        });
 
         ArgumentCaptor<OutboxEvent> outboxCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
         verify(outboxEventRepository).save(outboxCaptor.capture());
@@ -80,11 +104,31 @@ class InventorySagaServiceTest {
         when(reservationRepository.findByOrderId(orderId)).thenReturn(Optional.empty());
         when(stockLevelRepository.findByPharmacyIdAndProductId(PHARMACY_ID, PRODUCT_ID)).thenReturn(Optional.of(stock));
 
-        sagaService.handleOrderCreated(eventId, orderId, PHARMACY_ID,
-            List.of(new ReservationItem(PRODUCT_ID, BigDecimal.valueOf(5))), Instant.now());
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(InventorySagaService.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            sagaService.handleOrderCreated(eventId, orderId, PHARMACY_ID,
+                List.of(new ReservationItem(PRODUCT_ID, BigDecimal.valueOf(5))), Instant.now());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
 
         assertThat(stock.getQuantityOnHand()).isEqualByComparingTo(BigDecimal.valueOf(2));
         verify(reservationRepository, never()).save(any());
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "inventory.reservation.rejected")
+                .containsEntry("orderId", orderId)
+                .containsEntry("eventId", eventId)
+                .containsKey("resultEventId")
+                .containsEntry("failureCode", "INSUFFICIENT_STOCK")
+                .doesNotContainKeys("productId", "quantity", "pharmacyId");
+        });
 
         ArgumentCaptor<OutboxEvent> outboxCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
         verify(outboxEventRepository).save(outboxCaptor.capture());

@@ -31,9 +31,6 @@ public class CorrelationIdFilter implements GlobalFilter, Ordered {
         // Store in exchange attribute for downstream use
         exchange.getAttributes().put("correlationId", correlationId);
 
-        // Add to MDC for logging
-        MDC.put("correlationId", correlationId);
-
         // Mutate request to add/preserve correlation ID
         exchange = exchange.mutate()
             .request(exchange.getRequest().mutate()
@@ -44,10 +41,11 @@ public class CorrelationIdFilter implements GlobalFilter, Ordered {
         // Add to response headers
         exchange.getResponse().getHeaders().set(CORRELATION_ID_HEADER, correlationId);
 
-        logger.debug("Request {} with correlation ID: {}", exchange.getRequest().getPath(), correlationId);
+        try (MDC.MDCCloseable ignored = MDC.putCloseable("correlationId", correlationId)) {
+            logger.debug("Request {} with correlation ID: {}", exchange.getRequest().getPath(), correlationId);
+        }
 
-        return chain.filter(exchange)
-            .doFinally(signalType -> MDC.remove("correlationId"));
+        return chain.filter(exchange);
     }
 
     @Override

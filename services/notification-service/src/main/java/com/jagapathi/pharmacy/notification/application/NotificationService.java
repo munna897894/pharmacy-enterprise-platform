@@ -11,6 +11,8 @@ import com.jagapathi.pharmacy.notification.infrastructure.persistence.Notificati
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationTemplateRepository;
 import com.jagapathi.pharmacy.notification.infrastructure.channel.NotificationSender;
 import com.jagapathi.pharmacy.notification.infrastructure.messaging.NotificationEventPublisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,8 @@ import java.util.*;
 @Service
 @Transactional
 public class NotificationService {
+
+    private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
     
     private final NotificationRepository notificationRepository;
     private final NotificationTemplateRepository templateRepository;
@@ -71,10 +75,31 @@ public class NotificationService {
             notification.markAsSent();
             notificationRepository.save(notification);
             eventPublisher.notificationSent(notification);
+            var lifecycleLog = log.atInfo()
+                .addKeyValue("eventName", "notification.delivery.completed")
+                .addKeyValue("notificationId", notification.getId())
+                .addKeyValue("notificationType", notification.getType())
+                .addKeyValue("channel", channel)
+                .addKeyValue("outcome", "sent");
+            if (notification.getOrderId() != null) {
+                lifecycleLog.addKeyValue("orderId", notification.getOrderId());
+            }
+            lifecycleLog.log("Notification delivery lifecycle event");
         } catch (Exception e) {
             // The caller's transaction rolls back so the Kafka consumer retries delivery, but the
             // failed attempt and its NotificationFailed event must survive that rollback.
             failureRecorder.recordDeliveryFailure(notification, e.getClass().getSimpleName());
+            var lifecycleLog = log.atWarn()
+                .addKeyValue("eventName", "notification.delivery.failed")
+                .addKeyValue("notificationId", notification.getId())
+                .addKeyValue("notificationType", notification.getType())
+                .addKeyValue("channel", channel)
+                .addKeyValue("outcome", "failed")
+                .addKeyValue("errorType", e.getClass().getSimpleName());
+            if (notification.getOrderId() != null) {
+                lifecycleLog.addKeyValue("orderId", notification.getOrderId());
+            }
+            lifecycleLog.log("Notification delivery lifecycle event");
             throw new NotificationDeliveryException("Failed to send notification", e);
         }
     }

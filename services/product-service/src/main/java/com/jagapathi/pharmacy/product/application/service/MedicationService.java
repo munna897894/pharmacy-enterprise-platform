@@ -16,6 +16,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,10 +31,13 @@ public class MedicationService {
 
     private final MedicationRepository medicationRepository;
     private final MedicationMapper medicationMapper;
+    private final ObservationRegistry observationRegistry;
 
-    public MedicationService(MedicationRepository medicationRepository, MedicationMapper medicationMapper) {
+    public MedicationService(MedicationRepository medicationRepository, MedicationMapper medicationMapper,
+                             ObservationRegistry observationRegistry) {
         this.medicationRepository = medicationRepository;
         this.medicationMapper = medicationMapper;
+        this.observationRegistry = observationRegistry;
     }
 
     @CacheEvict(value = "medicationSearch", allEntries = true)
@@ -47,7 +52,7 @@ public class MedicationService {
         Medication medication = new Medication(ndcCode, name, genericName, manufacturer,
                                                 dosageForm, strength, unitPrice, currency);
         Medication saved = medicationRepository.save(medication);
-        log.info("Created medication: {} with NDC: {}", saved.getId(), ndcCode);
+        log.info("medication.created medicationId={} outcome=created", saved.getId());
         return medicationMapper.toResponse(saved);
     }
 
@@ -56,6 +61,7 @@ public class MedicationService {
     public MedicationResponse getMedicationById(String id) {
         Medication medication = medicationRepository.findById(id)
                 .orElseThrow(() -> new MedicationNotFoundException(id));
+        log.debug("medication.lookup.completed medicationId={} outcome=found", medication.getId());
         return medicationMapper.toResponse(medication);
     }
 
@@ -72,7 +78,7 @@ public class MedicationService {
 
         medication.update(name, genericName, manufacturer, dosageForm, strength, unitPrice);
         Medication saved = medicationRepository.save(medication);
-        log.info("Updated medication: {} ", id);
+        log.info("medication.updated medicationId={} outcome=updated", saved.getId());
         return medicationMapper.toResponse(saved);
     }
 
@@ -86,7 +92,7 @@ public class MedicationService {
 
         medication.setActive(active);
         Medication saved = medicationRepository.save(medication);
-        log.info("Updated medication status: {} to active={}", id, active);
+        log.info("medication.status.updated medicationId={} active={}", saved.getId(), saved.getActive());
         return medicationMapper.toResponse(saved);
     }
 
@@ -95,14 +101,18 @@ public class MedicationService {
     public PageResponse<MedicationResponse> searchMedications(String query, String manufacturer,
                                                               String dosageForm, Boolean active,
                                                               Pageable pageable) {
-        Page<Medication> page = medicationRepository.searchMedications(query, manufacturer, dosageForm, active, pageable);
-        return new PageResponse<>(
+        return Observation.createNotStarted("medication.catalog.search", observationRegistry).observe(() -> {
+            Page<Medication> page = Observation.createNotStarted("medication.repository.search", observationRegistry)
+                .lowCardinalityKeyValue("db.system", "mysql")
+                .observe(() -> medicationRepository.searchMedications(query, manufacturer, dosageForm, active, pageable));
+            return new PageResponse<>(
                 page.getContent().stream().map(medicationMapper::toResponse).toList(),
                 page.getNumber(),
                 page.getSize(),
                 page.getTotalElements(),
                 page.getTotalPages(),
                 page.isLast()
-        );
+            );
+        });
     }
 }

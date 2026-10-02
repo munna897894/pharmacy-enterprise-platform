@@ -1,6 +1,8 @@
 spring:
   application:
     name: api-gateway
+  reactor:
+    context-propagation: auto
   cloud:
     gateway:
       default-filters:
@@ -13,26 +15,6 @@ spring:
         response-timeout: 30000
       server:
         webflux:
-          globalcors:
-            cors-configurations:
-              '[/**]':
-                allowedOrigins:
-                  - "http://localhost:3000"
-                  - "https://app.example.com"
-                allowedMethods:
-                  - GET
-                  - POST
-                  - PUT
-                  - PATCH
-                  - DELETE
-                  - OPTIONS
-                allowedHeaders:
-                  - "*"
-                exposedHeaders:
-                  - "X-Correlation-ID"
-                  - "Retry-After"
-                allowCredentials: true
-                maxAge: 3600
 
   data:
     redis:
@@ -54,6 +36,10 @@ spring:
 
 auth-service:
   jwks-uri: http://${AUTH_SERVICE_HOST:auth-service}:${AUTH_SERVICE_PORT:8081}/api/v1/auth/.well-known/jwks.json
+
+gateway:
+  cors:
+    allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:4200,http://localhost:4200,https://app.example.com}
 
 rate-limit:
   per-user-per-minute: 100
@@ -111,9 +97,14 @@ management:
       endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}
 
 logging:
+  structured:
+    json:
+      add:
+        service: ${spring.application.name}
+        environment: ${ENVIRONMENT:prod}
   level:
     root: INFO
-    com.jagapathi.pharmacy.gateway: DEBUG
+    com.jagapathi.pharmacy.gateway: INFO
     org.springframework.cloud.gateway: INFO
     org.springframework.security: INFO
   pattern:

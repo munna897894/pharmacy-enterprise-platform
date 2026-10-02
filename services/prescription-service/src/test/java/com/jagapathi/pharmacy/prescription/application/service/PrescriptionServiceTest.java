@@ -17,6 +17,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -175,7 +177,8 @@ class PrescriptionServiceTest {
     }
     
     @Test
-    void testActivatePrescription() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void testActivatePrescription(CapturedOutput output) {
         String prescriptionId = UUID.randomUUID().toString();
         Prescription prescription = new Prescription(
             UUID.randomUUID().toString(),
@@ -205,6 +208,9 @@ class PrescriptionServiceTest {
         
         assertThat(response).isNotNull();
         verify(prescriptionRepository).save(any(Prescription.class));
+        assertThat(output).contains("prescription.verification.completed prescriptionId="
+                + prescription.getId() + " outcome=activated")
+                .doesNotContain(prescription.getCustomerId(), prescription.getPrescriberId());
     }
     
     @Test

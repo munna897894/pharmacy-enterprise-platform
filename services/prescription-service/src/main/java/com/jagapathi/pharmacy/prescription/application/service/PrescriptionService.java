@@ -68,7 +68,7 @@ public class PrescriptionService {
         }
         
         Prescription saved = prescriptionRepository.save(prescription);
-        log.info("Created prescription: {} for customer: {}", saved.getId(), request.customerId());
+        log.info("prescription.created prescriptionId={} outcome=pending", saved.getId());
         return prescriptionMapper.toResponse(saved);
     }
 
@@ -94,6 +94,8 @@ public class PrescriptionService {
             .orElseThrow(() -> new PrescriptionNotFoundException(prescriptionId));
         
         if (!prescription.isPending()) {
+            log.debug("prescription.verification.completed prescriptionId={} outcome=rejected reason=invalid_state",
+                prescription.getId());
             throw new InvalidPrescriptionStateException(
                 "Can only activate PENDING prescriptions, current status: " + prescription.getStatus()
             );
@@ -101,7 +103,7 @@ public class PrescriptionService {
         
         prescription.activate();
         Prescription saved = prescriptionRepository.save(prescription);
-        log.info("Activated prescription: {}", prescriptionId);
+        log.info("prescription.verification.completed prescriptionId={} outcome=activated", saved.getId());
         return prescriptionMapper.toResponse(saved);
     }
 
@@ -140,7 +142,9 @@ public class PrescriptionService {
         for (Prescription prescription : expiredPrescriptions) {
             prescription.expire();
             prescriptionRepository.save(prescription);
-            log.info("Expired prescription: {}", prescription.getId());
+        }
+        if (!expiredPrescriptions.isEmpty()) {
+            log.info("prescription.expiration.completed count={}", expiredPrescriptions.size());
         }
     }
 

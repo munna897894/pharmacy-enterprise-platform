@@ -14,6 +14,12 @@ data:
       "version": 1,
       "refresh": "30s",
       "time": { "from": "now-1h", "to": "now" },
+      "templating": {
+        "list": [
+          { "name": "correlationId", "type": "textbox", "label": "Correlation ID", "query": "", "current": { "text": "", "value": "" } },
+          { "name": "orderId", "type": "textbox", "label": "Order ID", "query": "", "current": { "text": "", "value": "" } }
+        ]
+      },
       "panels": [
         {
           "id": 1,
@@ -94,6 +100,15 @@ data:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
           "targets": [{ "expr": "sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~\".*\\\\.dlt\"}[5m]))", "legendFormat": "{{ "{{topic}}" }}", "refId": "A" }]
+        },
+        {
+          "id": 11,
+          "type": "logs",
+          "title": "Transaction timeline (correlation ID / order ID)",
+          "description": "Enter a correlation ID or order ID above, expand a log line and use its Trace link to open Tempo. Empty fields match all non-actuator application logs.",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 42 },
+          "targets": [{ "expr": "{namespace=\"pharmacy\"} |= \"$correlationId\" |= \"$orderId\" != \"/actuator/\"", "queryType": "range", "refId": "A" }]
         }
       ]
     }

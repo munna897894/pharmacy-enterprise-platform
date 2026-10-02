@@ -140,7 +140,6 @@ public class JwtProvider {
                     .parseSignedClaims(token)
                     .getPayload();
         } catch (JwtException | IllegalArgumentException e) {
-            logger.debug("JWT validation failed: {}", e.getMessage());
             throw new InvalidTokenException("Invalid token", e);
         }
     }

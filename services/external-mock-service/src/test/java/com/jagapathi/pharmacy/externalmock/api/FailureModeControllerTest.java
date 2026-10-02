@@ -1,17 +1,25 @@
 package com.jagapathi.pharmacy.externalmock.api;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.slf4j.LoggerFactory;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -76,5 +84,55 @@ class FailureModeControllerTest {
             .andExpect(status().isInternalServerError());
 
         mockMvc.perform(post("/api/v1/mock/reset")).andExpect(status().isNoContent());
+    }
+
+    @Test
+    void logsOnlySafePaymentLifecycleIdentifiersAndOutcome() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        mockMvc.perform(put("/api/v1/mock/payment").param("mode", "SUCCESS")).andExpect(status().isOk());
+
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(FailureModeController.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            mockMvc.perform(post("/api/v1/mock/process-payment")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                        {"amount":10.00,"currency":"USD","paymentMethod":"CREDIT_CARD","reference":"PAY-%s"}
+                        """.formatted(paymentId)))
+                .andExpect(status().isOk());
+            mockMvc.perform(put("/api/v1/mock/payment").param("mode", "REJECT")).andExpect(status().isOk());
+            mockMvc.perform(post("/api/v1/mock/process-payment")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                        {"amount":10.00,"currency":"USD","paymentMethod":"CREDIT_CARD","reference":"PAY-%s"}
+                        """.formatted(paymentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+            mockMvc.perform(post("/api/v1/mock/reset")).andExpect(status().isNoContent());
+        }
+
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "external.payment.gateway_response")
+                .containsEntry("paymentId", paymentId)
+                .containsEntry("outcome", "approved")
+                .doesNotContainKeys("amount", "currency", "paymentMethod", "reference", "transactionId");
+        });
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "external.payment.gateway_response")
+                .containsEntry("paymentId", paymentId)
+                .containsEntry("outcome", "declined")
+                .doesNotContainKeys("amount", "currency", "paymentMethod", "reference", "transactionId");
+        });
     }
 }

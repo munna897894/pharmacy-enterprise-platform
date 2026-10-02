@@ -141,6 +141,7 @@ springdoc:
 logging:
   pattern:
     correlation: "[%X{correlationId:-},%X{traceId:-},%X{spanId:-}]"
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] %logger{36} [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] service=audit-service environment=${ENVIRONMENT:local} - %msg %kvp%n"
 
 ---
 spring:

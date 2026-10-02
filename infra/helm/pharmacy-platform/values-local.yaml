@@ -7,7 +7,9 @@ defaultResources:
   limits:
     memory: 768Mi
 commonConfig:
+  ENVIRONMENT: local
   SPRING_PROFILES_ACTIVE: local
+  LOGGING_STRUCTURED_FORMAT_CONSOLE: logstash
   DB_HOST: host.docker.internal
   DB_PORT: "3308"
   KAFKA_BOOTSTRAP_SERVERS: host.docker.internal:29092
@@ -34,56 +36,57 @@ redis:
       memory: 256Mi
 services:
   api-gateway:
-    image: pharmacy/api-gateway:local
+    image: pharmacy/api-gateway:flow-logs-20261001-final
     port: 8080
     managementPort: 9081
     env:
+      SPRING_PROFILES_ACTIVE: local,k8s
       LOGGING_FILE_NAME: /tmp/api-gateway.log
   auth-service:
-    image: pharmacy/auth-service:local
+    image: pharmacy/auth-service:flow-logs-20261001
     port: 8081
     authKeys: pharmacy-secrets
     db: {name: auth_service, user: auth_user, passwordKey: AUTH_DB_PASSWORD}
   product-service:
-    image: pharmacy/product-service:local
+    image: pharmacy/product-service:flow-logs-20261001
     port: 8082
     env:
       PRODUCT_SERVICE_PORT: "8082"
     db: {name: pharmacy_product, user: product_user, passwordKey: PRODUCT_DB_PASSWORD}
   customer-service:
-    image: pharmacy/customer-service:local
+    image: pharmacy/customer-service:flow-logs-20261001
     port: 8083
     db: {name: pharmacy_customer, user: customer_user, passwordKey: CUSTOMER_DB_PASSWORD}
   pharmacy-service:
-    image: pharmacy/pharmacy-service:local
+    image: pharmacy/pharmacy-service:flow-logs-20261001
     port: 8084
     db: {name: pharmacy_pharmacy, user: pharmacy_user, passwordKey: PHARMACY_DB_PASSWORD}
   inventory-service:
-    image: pharmacy/inventory-service:local
+    image: pharmacy/inventory-service:flow-logs-20261001
     port: 8085
     db: {name: pharmacy_inventory, user: inventory_user, passwordKey: INVENTORY_DB_PASSWORD}
   prescription-service:
-    image: pharmacy/prescription-service:local
+    image: pharmacy/prescription-service:flow-logs-20261001
     port: 8086
     db: {name: prescription_service, user: prescription_user, passwordKey: PRESCRIPTION_DB_PASSWORD}
   order-service:
-    image: pharmacy/order-service:local
+    image: pharmacy/order-service:flow-logs-20261001
     port: 8087
     db: {name: pharmacy_order, user: order_user, passwordKey: ORDER_DB_PASSWORD}
   payment-service:
-    image: pharmacy/payment-service:local
+    image: pharmacy/payment-service:flow-logs-20261001
     port: 8088
     db: {name: pharmacy_payment, user: payment_user, passwordKey: PAYMENT_DB_PASSWORD}
   notification-service:
-    image: pharmacy/notification-service:local
+    image: pharmacy/notification-service:flow-logs-20261001
     port: 8089
     db: {name: pharmacy_notification, user: pharmacy_notification, passwordKey: NOTIFICATION_DB_PASSWORD}
   audit-service:
-    image: pharmacy/audit-service:local
+    image: pharmacy/audit-service:flow-logs-20261001
     port: 8090
     db: {name: pharmacy_audit, user: audit_user, passwordKey: AUDIT_DB_PASSWORD}
   external-mock-service:
-    image: pharmacy/external-mock-service:local
+    image: pharmacy/external-mock-service:flow-logs-20261001
     port: 8080
     env:
       EXTERNAL_MOCK_SERVICE_PORT: "8080"

@@ -44,8 +44,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: pharmacy-common
-          {{- if or $svc.db $svc.env $svc.authKeys }}
           env:
+            - name: LOGGING_STRUCTURED_JSON_ADD_SERVICE
+              value: {{ $name | quote }}
+            - name: LOGGING_STRUCTURED_JSON_ADD_ENVIRONMENT
+              value: {{ $.Values.commonConfig.ENVIRONMENT | default "local" | quote }}
             {{- with $svc.db }}
             - name: DB_NAME
               value: {{ .name | quote }}
@@ -61,7 +64,6 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-          {{- end }}
           startupProbe:
             httpGet:
               path: /actuator/health/liveness

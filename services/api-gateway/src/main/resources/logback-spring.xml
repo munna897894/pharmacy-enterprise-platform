@@ -2,10 +2,8 @@
 <configuration>
     <property name="LOG_FILE" value="${LOG_FILE:-${LOG_PATH:-${LOG_TEMP:-${java.io.tmpdir:-/tmp}}/spring.log}}"/>
     <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] - %msg%n"/>
-    <springProperty scope="context" name="serviceName" source="spring.application.name" defaultValue="api-gateway"/>
-    <springProperty scope="context" name="environmentName" source="ENVIRONMENT" defaultValue="prod"/>
 
-    <springProfile name="local">
+    <springProfile name="local &amp; !k8s">
         <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
             <encoder>
                 <pattern>${LOG_PATTERN}</pattern>
@@ -14,29 +12,22 @@
         </appender>
     </springProfile>
 
-    <springProfile name="!local">
+    <springProfile name="!local | k8s">
         <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-                <customFields>{"service":"${serviceName}","environment":"${environmentName}"}</customFields>
-                <fieldNames>
-                    <timestamp>timestamp</timestamp>
-                    <level>severity</level>
-                    <levelValue>level_value</levelValue>
-                    <loggerName>logger</loggerName>
-                    <threadName>thread</threadName>
-                    <message>message</message>
-                </fieldNames>
+            <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+                <format>logstash</format>
+                <charset>UTF-8</charset>
             </encoder>
         </appender>
     </springProfile>
 
-    <springProfile name="local">
+    <springProfile name="local &amp; !k8s">
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
     </springProfile>
 
-    <springProfile name="!local">
+    <springProfile name="!local | k8s">
         <root level="INFO">
             <appender-ref ref="JSON_CONSOLE"/>
         </root>

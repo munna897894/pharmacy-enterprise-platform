@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -70,7 +72,8 @@ class PharmacyServiceTest {
     }
 
     @Test
-    void testCreatePharmacy_Success() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void testCreatePharmacy_Success(CapturedOutput output) {
         CreatePharmacyRequest request = new CreatePharmacyRequest(
                 "Downtown Pharmacy", "LIC-001-2024", "(212) 555-0100", "America/New_York"
         );
@@ -81,6 +84,8 @@ class PharmacyServiceTest {
 
         assertThat(response).isNotNull();
         assertThat(response.name()).isEqualTo("Downtown Pharmacy");
+        assertThat(output).contains("pharmacy.created pharmacyId=" + pharmacy.getId() + " outcome=created")
+                .doesNotContain("LIC-001-2024", "(212) 555-0100");
     }
 
     @Test
@@ -94,7 +99,8 @@ class PharmacyServiceTest {
     }
 
     @Test
-    void testUpdatePharmacy_Success() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void testUpdatePharmacy_Success(CapturedOutput output) {
         Pharmacy pharmacy = new Pharmacy("Downtown Pharmacy", "LIC-001-2024", "(212) 555-0100", "America/New_York");
         UpdatePharmacyRequest request = new UpdatePharmacyRequest("Updated Downtown Pharmacy", "(212) 555-0200");
         when(pharmacyRepository.findById("p1000000-0000-0000-0000-000000000001"))
@@ -108,6 +114,8 @@ class PharmacyServiceTest {
         PharmacyResponse response = pharmacyService.updatePharmacy("p1000000-0000-0000-0000-000000000001", request, List.of("ROLE_STORE_MANAGER"));
 
         assertThat(response).isNotNull();
+        assertThat(output).contains("pharmacy.updated pharmacyId=" + pharmacy.getId() + " outcome=updated")
+                .doesNotContain("(212) 555-0200");
     }
 
     @Test
@@ -120,7 +128,8 @@ class PharmacyServiceTest {
     }
 
     @Test
-    void testUpdatePharmacyStatus_Success() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void testUpdatePharmacyStatus_Success(CapturedOutput output) {
         Pharmacy pharmacy = new Pharmacy("Downtown Pharmacy", "LIC-001-2024", "(212) 555-0100", "America/New_York");
         when(pharmacyRepository.findById("p1000000-0000-0000-0000-000000000001"))
                 .thenReturn(Optional.of(pharmacy));
@@ -133,6 +142,7 @@ class PharmacyServiceTest {
         PharmacyResponse response = pharmacyService.updatePharmacyStatus("p1000000-0000-0000-0000-000000000001", "CLOSED", List.of("ROLE_ADMIN"));
 
         assertThat(response).isNotNull();
+        assertThat(output).contains("pharmacy.status.updated pharmacyId=" + pharmacy.getId() + " status=CLOSED");
     }
 
     @Test

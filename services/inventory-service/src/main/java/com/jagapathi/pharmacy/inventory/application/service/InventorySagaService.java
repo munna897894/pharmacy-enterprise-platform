@@ -17,6 +17,8 @@ import com.jagapathi.pharmacy.inventory.infrastructure.ProcessedEventRepository;
 import com.jagapathi.pharmacy.inventory.infrastructure.event.InventoryRejectedEvent;
 import com.jagapathi.pharmacy.inventory.infrastructure.event.InventoryReleasedEvent;
 import com.jagapathi.pharmacy.inventory.infrastructure.event.InventoryReservedEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,7 @@ import java.util.UUID;
 public class InventorySagaService {
 
     private static final long KAFKA_SEND_TIMEOUT_MS = 10_000L;
+    private static final Logger log = LoggerFactory.getLogger(InventorySagaService.class);
 
     private static final String INVENTORY_EVENTS_TOPIC = "pharmacy.inventory.events.v1";
     private static final String INVENTORY_ORDER_CREATED_CONSUMER = "inventory-order-created-v1";
@@ -76,8 +79,16 @@ public class InventorySagaService {
         for (ReservationItem item : items) {
             StockLevel stock = stockLevelRepository.findByPharmacyIdAndProductId(pharmacyId, item.productId()).orElse(null);
             if (stock == null || stock.getQuantityOnHand().compareTo(item.quantity()) < 0) {
-                publishRejected(orderId, "INSUFFICIENT_STOCK", occurredAt);
+                UUID resultEventId = publishRejected(orderId, "INSUFFICIENT_STOCK", occurredAt);
                 markProcessed(orderId, eventId, INVENTORY_ORDER_CREATED_CONSUMER);
+                log.atWarn()
+                    .addKeyValue("eventName", "inventory.reservation.rejected")
+                    .addKeyValue("orderId", orderId)
+                    .addKeyValue("eventId", eventId)
+                    .addKeyValue("resultEventId", resultEventId)
+                    .addKeyValue("outcome", "rejected")
+                    .addKeyValue("failureCode", "INSUFFICIENT_STOCK")
+                    .log("Inventory reservation lifecycle event");
                 return;
             }
         }
@@ -93,8 +104,16 @@ public class InventorySagaService {
         InventoryReservation reservation = new InventoryReservation(orderId, pharmacyId, itemsJson);
         reservationRepository.save(reservation);
 
-        publishReserved(orderId, reservation.getId(), pharmacyId, occurredAt);
+        UUID resultEventId = publishReserved(orderId, reservation.getId(), pharmacyId, occurredAt);
         markProcessed(orderId, eventId, INVENTORY_ORDER_CREATED_CONSUMER);
+        log.atInfo()
+            .addKeyValue("eventName", "inventory.reservation.completed")
+            .addKeyValue("orderId", orderId)
+            .addKeyValue("eventId", eventId)
+            .addKeyValue("resultEventId", resultEventId)
+            .addKeyValue("reservationId", reservation.getId())
+            .addKeyValue("outcome", "reserved")
+            .log("Inventory reservation lifecycle event");
     }
 
     @Transactional
@@ -102,13 +121,24 @@ public class InventorySagaService {
         if (processedEventRepository.existsByOrderIdAndEventId(orderId, eventId)) {
             return;
         }
-        reservationRepository.findByOrderId(orderId).ifPresent(reservation -> {
-            if ("RESERVED".equals(reservation.getStatus())) {
+        boolean committed = reservationRepository.findByOrderId(orderId)
+            .map(reservation -> {
+                if (!"RESERVED".equals(reservation.getStatus())) {
+                    return false;
+                }
                 reservation.commit();
                 reservationRepository.save(reservation);
-            }
-        });
+                return true;
+            })
+            .orElse(false);
         markProcessed(orderId, eventId, INVENTORY_PAYMENT_RESULT_CONSUMER);
+        var lifecycleLog = log.atLevel(committed ? org.slf4j.event.Level.INFO : org.slf4j.event.Level.WARN)
+            .addKeyValue("eventName", committed
+                ? "inventory.reservation.committed" : "inventory.reservation.commit_skipped")
+            .addKeyValue("orderId", orderId)
+            .addKeyValue("eventId", eventId)
+            .addKeyValue("outcome", committed ? "committed" : "unchanged");
+        lifecycleLog.log("Inventory reservation lifecycle event");
     }
 
     @Transactional
@@ -116,15 +146,29 @@ public class InventorySagaService {
         if (processedEventRepository.existsByOrderIdAndEventId(orderId, eventId)) {
             return;
         }
-        reservationRepository.findByOrderId(orderId).ifPresent(reservation -> {
-            if ("RESERVED".equals(reservation.getStatus())) {
+        boolean released = reservationRepository.findByOrderId(orderId)
+            .map(reservation -> {
+                if (!"RESERVED".equals(reservation.getStatus())) {
+                    return false;
+                }
                 releaseStock(reservation);
                 reservation.release();
                 reservationRepository.save(reservation);
                 publishReleased(orderId, reservation.getId(), "PAYMENT_FAILED", Instant.now());
-            }
-        });
+                return true;
+            })
+            .orElse(false);
         markProcessed(orderId, eventId, INVENTORY_PAYMENT_RESULT_CONSUMER);
+        var lifecycleLog = log.atLevel(released ? org.slf4j.event.Level.INFO : org.slf4j.event.Level.WARN)
+            .addKeyValue("eventName", released
+                ? "inventory.reservation.released" : "inventory.reservation.release_skipped")
+            .addKeyValue("orderId", orderId)
+            .addKeyValue("eventId", eventId)
+            .addKeyValue("outcome", released ? "released" : "unchanged");
+        if (released) {
+            lifecycleLog.addKeyValue("failureCode", "PAYMENT_FAILED");
+        }
+        lifecycleLog.log("Inventory reservation lifecycle event");
     }
 
     private void releaseStock(InventoryReservation reservation) {
@@ -142,31 +186,40 @@ public class InventorySagaService {
         }
     }
 
-    private void publishReserved(UUID orderId, UUID reservationId, String pharmacyId, Instant occurredAt) {
+    private UUID publishReserved(UUID orderId, UUID reservationId, String pharmacyId, Instant occurredAt) {
         try {
             UUID eventId = UUID.randomUUID();
             var payload = new InventoryReservedEvent(eventId, orderId, reservationId, pharmacyId, Instant.now());
             saveOutbox(orderId, "InventoryReserved", objectMapper.writeValueAsString(payload));
+            return eventId;
         } catch (Exception e) {
             throw new IllegalStateException("Failed to publish InventoryReserved for order " + orderId, e);
         }
     }
 
-    private void publishRejected(UUID orderId, String reasonCode, Instant occurredAt) {
+    private UUID publishRejected(UUID orderId, String reasonCode, Instant occurredAt) {
         try {
             UUID eventId = UUID.randomUUID();
             var payload = new InventoryRejectedEvent(eventId, orderId, reasonCode, Instant.now());
             saveOutbox(orderId, "InventoryRejected", objectMapper.writeValueAsString(payload));
+            return eventId;
         } catch (Exception e) {
             throw new IllegalStateException("Failed to publish InventoryRejected for order " + orderId, e);
         }
     }
 
-    private void publishReleased(UUID orderId, UUID reservationId, String reasonCode, Instant occurredAt) {
+    private UUID publishReleased(UUID orderId, UUID reservationId, String reasonCode, Instant occurredAt) {
         try {
             UUID eventId = UUID.randomUUID();
             var payload = new InventoryReleasedEvent(eventId, orderId, reservationId, reasonCode, occurredAt);
             saveOutbox(orderId, "InventoryReleased", objectMapper.writeValueAsString(payload));
+            log.atInfo()
+                .addKeyValue("eventName", "inventory.reservation.release_event.created")
+                .addKeyValue("orderId", orderId)
+                .addKeyValue("eventId", eventId)
+                .addKeyValue("outcome", "queued")
+                .log("Inventory reservation lifecycle event");
+            return eventId;
         } catch (Exception e) {
             throw new IllegalStateException("Failed to publish InventoryReleased for order " + orderId, e);
         }

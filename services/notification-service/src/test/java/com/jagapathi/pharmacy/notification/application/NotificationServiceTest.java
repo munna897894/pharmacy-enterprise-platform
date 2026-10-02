@@ -8,13 +8,17 @@ import com.jagapathi.pharmacy.notification.infrastructure.channel.NotificationSe
 import com.jagapathi.pharmacy.notification.infrastructure.messaging.NotificationEventPublisher;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationRepository;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.NotificationTemplateRepository;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -166,11 +170,29 @@ class NotificationServiceTest {
         when(emailSender.supports(Channel.EMAIL)).thenReturn(true);
         when(notificationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        notificationService.publishNotification(notification, Channel.EMAIL);
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(NotificationService.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            notificationService.publishNotification(notification, Channel.EMAIL);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
 
         assertThat(notification.getStatus()).isEqualTo(NotificationStatus.SENT);
         verify(eventPublisher).notificationSent(notification);
         verifyNoInteractions(failureRecorder);
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "notification.delivery.completed")
+                .containsEntry("notificationId", notification.getId())
+                .containsEntry("orderId", notification.getOrderId())
+                .doesNotContainKeys("recipient", "email", "message", "subject");
+        });
     }
 
     @Test
@@ -180,11 +202,30 @@ class NotificationServiceTest {
         when(emailSender.supports(Channel.EMAIL)).thenReturn(true);
         doThrow(new IllegalStateException("smtp down")).when(emailSender).send(notification);
 
-        assertThatThrownBy(() -> notificationService.publishNotification(notification, Channel.EMAIL))
-                .isInstanceOf(NotificationDeliveryException.class);
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(NotificationService.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertThatThrownBy(() -> notificationService.publishNotification(notification, Channel.EMAIL))
+                    .isInstanceOf(NotificationDeliveryException.class);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
 
         verify(failureRecorder).recordDeliveryFailure(notification, "IllegalStateException");
         verify(eventPublisher, never()).notificationSent(any());
         verifyNoInteractions(notificationRepository);
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "notification.delivery.failed")
+                .containsEntry("notificationId", notification.getId())
+                .containsEntry("orderId", notification.getOrderId())
+                .containsEntry("outcome", "failed")
+                .doesNotContainKeys("recipient", "email", "message", "subject");
+        });
     }
 }

@@ -5,6 +5,10 @@ import com.jagapathi.pharmacy.observability.BusinessMetric;
 import com.jagapathi.pharmacy.observability.OutboxMetricsSnapshot;
 import com.jagapathi.pharmacy.observability.RecordBusinessMetric;
 import com.jagapathi.pharmacy.observability.TraceContextHeaders;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.jagapathi.pharmacy.order.api.request.CreateOrderRequest;
 import com.jagapathi.pharmacy.order.api.response.OrderResponse;
 import com.jagapathi.pharmacy.order.domain.*;
@@ -21,11 +25,13 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 public class OrderService {
 
     private static final long KAFKA_SEND_TIMEOUT_MS = 10_000L;
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -36,12 +42,14 @@ public class OrderService {
     private final ObjectMapper objectMapper;
     private final InventoryAvailabilityClient inventoryAvailabilityClient;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
+    private final ObservationRegistry observationRegistry;
 
     public OrderService(OrderRepository orderRepository, OrderItemRepository orderItemRepository,
                        OutboxEventRepository outboxEventRepository, ProcessedEventRepository processedEventRepository,
                        OrderStatusHistoryRepository statusHistoryRepository, KafkaTemplate<String, String> kafkaTemplate,
                        ObjectMapper objectMapper, InventoryAvailabilityClient inventoryAvailabilityClient,
-                       IdempotencyRecordRepository idempotencyRecordRepository) {
+                       IdempotencyRecordRepository idempotencyRecordRepository,
+                       ObservationRegistry observationRegistry) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.outboxEventRepository = outboxEventRepository;
@@ -51,6 +59,7 @@ public class OrderService {
         this.objectMapper = objectMapper;
         this.inventoryAvailabilityClient = inventoryAvailabilityClient;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
+        this.observationRegistry = observationRegistry;
     }
 
     @Transactional
@@ -68,22 +77,24 @@ public class OrderService {
     @RecordBusinessMetric(BusinessMetric.ORDER_CREATED)
     public OrderResponse createOrder(CreateOrderRequest request, String idempotencyKey) {
         String requestHash = hashRequest(request);
-        var existing = idempotencyRecordRepository.findByCustomerIdAndIdempotencyKey(
-            request.getCustomerId(), idempotencyKey);
+        var existing = observeDatabase("order.database.idempotency.lookup", () ->
+            idempotencyRecordRepository.findByCustomerIdAndIdempotencyKey(
+                request.getCustomerId(), idempotencyKey));
         if (existing.isPresent()) {
             IdempotencyRecord record = existing.get();
             if (!record.getRequestHash().equals(requestHash)) {
                 throw new IdempotencyConflictException(
                     "Idempotency-Key '" + idempotencyKey + "' was already used with a different request body");
             }
-            Order order = orderRepository.findById(record.getOrderId())
-                .orElseThrow(() -> new OrderNotFoundException(record.getOrderId()));
+            Order order = observeDatabase("order.database.order.lookup", () ->
+                orderRepository.findById(record.getOrderId())
+                    .orElseThrow(() -> new OrderNotFoundException(record.getOrderId())));
             return new OrderResponse(order);
         }
 
         OrderResponse response = doCreateOrder(request);
-        idempotencyRecordRepository.save(new IdempotencyRecord(
-            idempotencyKey, request.getCustomerId(), requestHash, response.getId()));
+        observeDatabase("order.database.idempotency.save", () -> idempotencyRecordRepository.save(new IdempotencyRecord(
+            idempotencyKey, request.getCustomerId(), requestHash, response.getId())));
         return response;
     }
 
@@ -122,6 +133,11 @@ public class OrderService {
                 itemRequest.getQuantity()
             );
             if (availability == null || !availability.available()) {
+                log.atWarn()
+                    .addKeyValue("eventName", "order.creation.rejected")
+                    .addKeyValue("outcome", "rejected")
+                    .addKeyValue("failureCode", "INVENTORY_UNAVAILABLE")
+                    .log("Order creation failed at inventory availability check");
                 throw new IllegalArgumentException(availability == null || availability.reason() == null
                     ? "Inventory is unavailable for one or more items"
                     : availability.reason());
@@ -148,11 +164,11 @@ public class OrderService {
         }
 
         // Save order
-        Order savedOrder = orderRepository.save(order);
+        Order savedOrder = observeDatabase("order.database.order.save", () -> orderRepository.save(order));
 
         // Transition to INVENTORY_PENDING and create outbox event
         savedOrder.transitionTo(OrderStatus.INVENTORY_PENDING);
-        orderRepository.save(savedOrder);
+        observeDatabase("order.database.order.save", () -> orderRepository.save(savedOrder));
 
         // Create and save OrderCreatedEvent to outbox
         createOutboxEvent(orderId, savedOrder);
@@ -193,10 +209,23 @@ public class OrderService {
                 objectMapper.writeValueAsString(TraceContextHeaders.capture())
             );
 
-            outboxEventRepository.save(outboxEvent);
+            observeDatabase("order.database.outbox.save", () -> outboxEventRepository.save(outboxEvent));
+            log.atInfo()
+                .addKeyValue("eventName", "order.lifecycle.created")
+                .addKeyValue("orderId", orderId)
+                .addKeyValue("eventId", eventId)
+                .addKeyValue("status", OrderStatus.INVENTORY_PENDING)
+                .addKeyValue("outcome", "accepted")
+                .log("Order lifecycle event");
         } catch (Exception e) {
             throw new RuntimeException("Failed to create outbox event", e);
         }
+    }
+
+    private <T> T observeDatabase(String operation, Supplier<T> action) {
+        return Observation.createNotStarted(operation, observationRegistry)
+            .lowCardinalityKeyValue("db.system", "mysql")
+            .observe(action);
     }
 
     @Transactional
@@ -227,6 +256,14 @@ public class OrderService {
             "Inventory reserved", event.eventId
         );
         statusHistoryRepository.save(history);
+        log.atInfo()
+            .addKeyValue("eventName", "order.lifecycle.transitioned")
+            .addKeyValue("orderId", event.orderId)
+            .addKeyValue("eventId", event.eventId)
+            .addKeyValue("fromStatus", OrderStatus.INVENTORY_PENDING)
+            .addKeyValue("toStatus", OrderStatus.PAYMENT_PENDING)
+            .addKeyValue("outcome", "success")
+            .log("Order lifecycle event");
     }
 
     @Transactional
@@ -252,6 +289,15 @@ public class OrderService {
             "Inventory rejected: " + event.reasonCode, event.eventId
         );
         statusHistoryRepository.save(history);
+        log.atWarn()
+            .addKeyValue("eventName", "order.lifecycle.transitioned")
+            .addKeyValue("orderId", event.orderId)
+            .addKeyValue("eventId", event.eventId)
+            .addKeyValue("fromStatus", OrderStatus.INVENTORY_PENDING)
+            .addKeyValue("toStatus", OrderStatus.CANCELLED_INVENTORY)
+            .addKeyValue("outcome", "rejected")
+            .addKeyValue("failureCode", event.reasonCode)
+            .log("Order lifecycle event");
     }
 
     @Transactional
@@ -283,6 +329,15 @@ public class OrderService {
             "Payment " + ("SUCCESS".equals(event.status) ? "completed" : "failed"), event.eventId
         );
         statusHistoryRepository.save(history);
+        boolean successfulPayment = "SUCCESS".equals(event.status);
+        log.atLevel(successfulPayment ? org.slf4j.event.Level.INFO : org.slf4j.event.Level.WARN)
+            .addKeyValue("eventName", "order.lifecycle.transitioned")
+            .addKeyValue("orderId", event.orderId)
+            .addKeyValue("eventId", event.eventId)
+            .addKeyValue("fromStatus", OrderStatus.PAYMENT_PENDING)
+            .addKeyValue("toStatus", toStatus)
+            .addKeyValue("outcome", successfulPayment ? "success" : "failed")
+            .log("Order lifecycle event");
     }
 
     @Transactional
@@ -296,6 +351,13 @@ public class OrderService {
 
         order.transitionTo(OrderStatus.READY_FOR_PICKUP);
         orderRepository.save(order);
+        log.atInfo()
+            .addKeyValue("eventName", "order.lifecycle.transitioned")
+            .addKeyValue("orderId", orderId)
+            .addKeyValue("fromStatus", OrderStatus.CONFIRMED)
+            .addKeyValue("toStatus", OrderStatus.READY_FOR_PICKUP)
+            .addKeyValue("outcome", "success")
+            .log("Order lifecycle event");
     }
 
     @Transactional
@@ -312,6 +374,13 @@ public class OrderService {
             item.transitionTo(OrderItemStatus.DELIVERED);
         }
         orderRepository.save(order);
+        log.atInfo()
+            .addKeyValue("eventName", "order.lifecycle.transitioned")
+            .addKeyValue("orderId", orderId)
+            .addKeyValue("fromStatus", OrderStatus.READY_FOR_PICKUP)
+            .addKeyValue("toStatus", OrderStatus.COMPLETED)
+            .addKeyValue("outcome", "success")
+            .log("Order lifecycle event");
     }
 
     @Transactional
@@ -337,6 +406,13 @@ public class OrderService {
             historyId, orderId, currentStatus, newStatus, "Cancelled: " + reason, null
         );
         statusHistoryRepository.save(history);
+        log.atWarn()
+            .addKeyValue("eventName", "order.lifecycle.transitioned")
+            .addKeyValue("orderId", orderId)
+            .addKeyValue("fromStatus", currentStatus)
+            .addKeyValue("toStatus", newStatus)
+            .addKeyValue("outcome", "cancelled")
+            .log("Order lifecycle event");
     }
 
     @Transactional(readOnly = true)

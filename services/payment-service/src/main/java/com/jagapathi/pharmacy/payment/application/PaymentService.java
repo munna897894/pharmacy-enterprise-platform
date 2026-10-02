@@ -13,6 +13,8 @@ import com.jagapathi.pharmacy.payment.infrastructure.OutboxRepository;
 import com.jagapathi.pharmacy.payment.infrastructure.OrderLookupClient;
 import com.jagapathi.pharmacy.payment.infrastructure.PaymentGatewayClient;
 import com.jagapathi.pharmacy.payment.infrastructure.PaymentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +29,7 @@ import java.util.UUID;
 public class PaymentService {
 
     private static final long KAFKA_SEND_TIMEOUT_MS = 10_000L;
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
     
     private final PaymentRepository paymentRepository;
     private final OutboxRepository outboxRepository;
@@ -196,8 +199,8 @@ public class PaymentService {
     
     private void publishPaymentEvent(Payment payment, PaymentStatus status,
                                      String providerReference, String failureCode) {
+        UUID eventId = UUID.randomUUID();
         try {
-            UUID eventId = UUID.randomUUID();
             boolean success = status == PaymentStatus.SUCCESS;
             Instant now = Instant.now();
 
@@ -224,15 +227,32 @@ public class PaymentService {
             );
             
             outboxRepository.save(outboxEvent);
+            var lifecycleLog = log.atLevel(success ? org.slf4j.event.Level.INFO : org.slf4j.event.Level.WARN)
+                .addKeyValue("eventName", success ? "payment.lifecycle.completed" : "payment.lifecycle.failed")
+                .addKeyValue("paymentId", payment.getId())
+                .addKeyValue("orderId", payment.getOrderId())
+                .addKeyValue("eventId", eventId)
+                .addKeyValue("status", status)
+                .addKeyValue("outcome", success ? "success" : "failed");
+            if (failureCode != null) {
+                lifecycleLog.addKeyValue("failureCode", failureCode);
+            }
+            lifecycleLog.log("Payment lifecycle event");
         } catch (Exception e) {
-            // Log error but don't throw - payment is already persisted
+            log.atError()
+                .addKeyValue("eventName", "payment.event.persistence.failed")
+                .addKeyValue("paymentId", payment.getId())
+                .addKeyValue("orderId", payment.getOrderId())
+                .addKeyValue("eventId", eventId)
+                .addKeyValue("outcome", "failed")
+                .addKeyValue("errorType", e.getClass().getSimpleName())
+                .log("Unable to persist payment lifecycle event");
         }
     }
     
     private void publishRefundEvent(Payment payment) {
+        UUID eventId = UUID.randomUUID();
         try {
-            UUID eventId = UUID.randomUUID();
-            
             PaymentRefundedEvent event = new PaymentRefundedEvent(
                 eventId,
                 "PaymentRefundedEvent",
@@ -256,8 +276,22 @@ public class PaymentService {
             );
             
             outboxRepository.save(outboxEvent);
+            log.atInfo()
+                .addKeyValue("eventName", "payment.lifecycle.refunded")
+                .addKeyValue("paymentId", payment.getId())
+                .addKeyValue("orderId", payment.getOrderId())
+                .addKeyValue("eventId", eventId)
+                .addKeyValue("outcome", "refunded")
+                .log("Payment lifecycle event");
         } catch (Exception e) {
-            // Log error but don't throw
+            log.atError()
+                .addKeyValue("eventName", "payment.refund_event.persistence.failed")
+                .addKeyValue("paymentId", payment.getId())
+                .addKeyValue("orderId", payment.getOrderId())
+                .addKeyValue("eventId", eventId)
+                .addKeyValue("outcome", "failed")
+                .addKeyValue("errorType", e.getClass().getSimpleName())
+                .log("Unable to persist payment refund event");
         }
     }
     

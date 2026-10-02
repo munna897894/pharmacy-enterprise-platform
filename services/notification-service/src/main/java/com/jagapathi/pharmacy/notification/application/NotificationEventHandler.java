@@ -6,6 +6,8 @@ import com.jagapathi.pharmacy.notification.domain.OrderCustomer;
 import com.jagapathi.pharmacy.notification.domain.ProcessedEvent;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.OrderCustomerRepository;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.ProcessedEventRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +25,7 @@ import java.util.UUID;
 public class NotificationEventHandler {
 
     private static final String SIMULATED_EMAIL = "customer@example.com";
+    private static final Logger log = LoggerFactory.getLogger(NotificationEventHandler.class);
 
     private final NotificationService notificationService;
     private final OrderCustomerRepository orderCustomerRepository;
@@ -48,6 +51,7 @@ public class NotificationEventHandler {
             orderCustomerRepository.save(new OrderCustomer(orderId, customerId, clock.instant()));
         }
         markProcessed(eventId);
+        logEventProcessed("notification.order_projection.updated", eventId, orderId, "success");
     }
 
     @Transactional
@@ -62,6 +66,7 @@ public class NotificationEventHandler {
                 "currency", nullToEmpty(currency),
                 "email", SIMULATED_EMAIL));
         markProcessed(eventId);
+        logEventProcessed("notification.payment_completed.handled", eventId, orderId, "success");
     }
 
     @Transactional
@@ -75,6 +80,7 @@ public class NotificationEventHandler {
                 "failureCode", failureCode == null ? "UNKNOWN" : failureCode,
                 "email", SIMULATED_EMAIL));
         markProcessed(eventId);
+        logEventProcessed("notification.payment_failed.handled", eventId, orderId, "failure_notified");
     }
 
     @Transactional
@@ -86,6 +92,7 @@ public class NotificationEventHandler {
             List.of(Channel.EMAIL),
             Map.of("orderId", orderId.toString(), "amount", plain(refundAmount), "email", SIMULATED_EMAIL));
         markProcessed(eventId);
+        logEventProcessed("notification.payment_refunded.handled", eventId, orderId, "success");
     }
 
     @Transactional
@@ -122,6 +129,15 @@ public class NotificationEventHandler {
 
     private void markProcessed(String eventId) {
         processedEventRepository.save(new ProcessedEvent(eventId));
+    }
+
+    private void logEventProcessed(String eventName, String eventId, UUID orderId, String outcome) {
+        log.atInfo()
+            .addKeyValue("eventName", eventName)
+            .addKeyValue("eventId", eventId)
+            .addKeyValue("orderId", orderId)
+            .addKeyValue("outcome", outcome)
+            .log("Notification event lifecycle event");
     }
 
     private static String plain(BigDecimal value) {

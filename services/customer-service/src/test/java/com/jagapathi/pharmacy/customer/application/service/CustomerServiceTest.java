@@ -11,6 +11,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -33,7 +35,8 @@ class CustomerServiceTest {
     private CustomerService customerService;
 
     @Test
-    void should_create_customer() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void should_create_customer(CapturedOutput output) {
         when(customerRepository.save(any(Customer.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -49,6 +52,23 @@ class CustomerServiceTest {
         assertThat(response).isNotNull();
         assertThat(response.firstName()).isEqualTo("John");
         assertThat(response.email()).isEqualTo("john@example.com");
+        assertThat(output).contains("customer.profile.created customerId=" + response.id() + " outcome=created")
+                .doesNotContain("john@example.com", "555-1234", "1990-01-15");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void should_log_profile_update_without_private_fields(CapturedOutput output) {
+        Customer customer = new Customer("user-123", "John", "Doe", "john@example.com",
+                "555-1234", LocalDate.of(1990, 1, 15));
+        when(customerRepository.findById(customer.getId())).thenReturn(Optional.of(customer));
+        when(customerRepository.save(customer)).thenReturn(customer);
+
+        customerService.updateCustomer(customer.getId(), "user-123", List.of(),
+                "Jane", "Doe", "jane@example.com", "555-5678", LocalDate.of(1991, 2, 16));
+
+        assertThat(output).contains("customer.profile.updated customerId=" + customer.getId() + " outcome=updated")
+                .doesNotContain("jane@example.com", "555-5678", "1991-02-16");
     }
 
     @Test

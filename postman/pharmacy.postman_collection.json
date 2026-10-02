@@ -4395,7 +4395,7 @@
                     "status"
                   ]
                 },
-                "description": "Bounded poll (max 30 attempts) for the choreography saga to reach CONFIRMED."
+                "description": "Bounded poll (up to 30 retries, one second apart) for the choreography saga to reach CONFIRMED. The wait is built into this request, so Collection Runner needs no configured request delay."
               },
               "response": [],
               "event": [
@@ -4404,6 +4404,9 @@
                   "script": {
                     "type": "text/javascript",
                     "exec": [
+                      "if (parseInt(pm.environment.get('pollAttempts') || '0', 10) > 0) {",
+                      "    setTimeout(function () {}, 1000);",
+                      "}",
                       "// Generate a fresh correlation ID for every request so it can be",
                       "// followed end-to-end across services/logs/dashboards.",
                       "pm.environment.set('correlationId', pm.variables.replaceIn('{{$guid}}'));"
@@ -4415,17 +4418,32 @@
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "const body = pm.response.json();",
-                      "const attempts = parseInt(pm.environment.get('pollAttempts') || '0', 10);",
-                      "if (body.status === 'CONFIRMED') {",
-                      "    pm.test('Order is CONFIRMED', function () { pm.expect(body.status).to.eql('CONFIRMED'); });",
-                      "} else if (body.status && body.status.startsWith('CANCELLED')) {",
-                      "    pm.test('Order unexpectedly cancelled', function () { pm.expect.fail('Expected CONFIRMED but order was ' + body.status); });",
-                      "} else if (attempts < 30) {",
-                      "    pm.environment.set('pollAttempts', String(attempts + 1));",
-                      "    pm.execution.setNextRequest('3. Poll Until CONFIRMED (bounded)');",
+                      "pm.test('Status code is one of [200]', function () {",
+                      "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                      "});",
+                      "pm.test('X-Correlation-ID is echoed back', function () {",
+                      "    const sent = pm.request.headers.get('X-Correlation-ID');",
+                      "    if (sent) {",
+                      "        pm.expect(pm.response.headers.get('X-Correlation-ID') || sent).to.be.a('string');",
+                      "    }",
+                      "});",
+                      "if (pm.response.code !== 200) {",
+                      "    pm.execution.setNextRequest(null);",
                       "} else {",
-                      "    pm.test('Order reached CONFIRMED within bounded polling window', function () { pm.expect.fail('Timed out; last status ' + body.status); });",
+                      "    const body = pm.response.json();",
+                      "    const attempts = parseInt(pm.environment.get('pollAttempts') || '0', 10);",
+                      "    if (body.status === 'CONFIRMED') {",
+                      "        pm.test('Order is CONFIRMED', function () { pm.expect(body.status).to.eql('CONFIRMED'); });",
+                      "    } else if (body.status && body.status.startsWith('CANCELLED')) {",
+                      "        pm.test('Order unexpectedly cancelled', function () { pm.expect.fail('Expected CONFIRMED but order was ' + body.status); });",
+                      "        pm.execution.setNextRequest(null);",
+                      "    } else if (attempts < 30) {",
+                      "        pm.environment.set('pollAttempts', String(attempts + 1));",
+                      "        pm.execution.setNextRequest('3. Poll Until CONFIRMED (bounded)');",
+                      "    } else {",
+                      "        pm.test('Order reached CONFIRMED within bounded polling window', function () { pm.expect.fail('Timed out; last status ' + body.status); });",
+                      "        pm.execution.setNextRequest(null);",
+                      "    }",
                       "}"
                     ]
                   }

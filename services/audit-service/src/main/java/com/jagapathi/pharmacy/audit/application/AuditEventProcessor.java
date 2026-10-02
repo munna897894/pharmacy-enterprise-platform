@@ -9,6 +9,8 @@ import com.jagapathi.pharmacy.audit.domain.AuditResourceType;
 import com.jagapathi.pharmacy.audit.domain.AuditStatus;
 import com.jagapathi.pharmacy.audit.domain.ProcessedEvent;
 import com.jagapathi.pharmacy.audit.infrastructure.persistence.ProcessedEventRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,8 @@ import java.util.UUID;
 
 @Service
 public class AuditEventProcessor {
+
+    private static final Logger log = LoggerFactory.getLogger(AuditEventProcessor.class);
 
     private static final Map<AuditResourceType, String> SERVICE_NAMES = Map.of(
         AuditResourceType.PRODUCT, "product-service",
@@ -76,6 +80,21 @@ public class AuditEventProcessor {
             null
         );
         processedEventRepository.save(new ProcessedEvent(eventId));
+        var lifecycleLog = log.atLevel(status == AuditStatus.FAILURE
+            ? org.slf4j.event.Level.WARN : org.slf4j.event.Level.INFO);
+        lifecycleLog
+            .addKeyValue("eventName", "audit.event.recorded")
+            .addKeyValue("eventId", eventId)
+            .addKeyValue("eventType", eventType)
+            .addKeyValue("aggregateId", aggregateId)
+            .addKeyValue("resourceType", resourceType)
+            .addKeyValue("auditStatus", status)
+            .addKeyValue("outcome", status == AuditStatus.FAILURE ? "business_failure_recorded" : "success");
+        String orderId = text(event, "orderId");
+        if (orderId != null) {
+            lifecycleLog.addKeyValue("orderId", orderId);
+        }
+        lifecycleLog.log("Audit lifecycle event");
     }
 
     private JsonNode readEvent(String message) {

@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -56,7 +58,8 @@ class AuthServiceTest {
     }
 
     @Test
-    void testRegisterUserSuccess() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void testRegisterUserSuccess(CapturedOutput output) {
         RegisterRequest request = new RegisterRequest(
                 "john@example.com",
                 "john_doe",
@@ -83,6 +86,8 @@ class AuthServiceTest {
         assertThat(response.lastName()).isEqualTo("Doe");
         assertThat(response.roles()).containsExactly(Role.CUSTOMER);
         assertThat(response.isActive()).isTrue();
+        assertThat(output).contains("auth.registration.completed userId=" + response.id() + " outcome=created")
+                .doesNotContain("john@example.com", "Password123!");
     }
 
     @Test
@@ -143,7 +148,8 @@ class AuthServiceTest {
     }
 
     @Test
-    void testAuthenticateUserSuccess() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void testAuthenticateUserSuccess(CapturedOutput output) {
         UUID userId = UUID.randomUUID();
         String password = "Password123!";
         String hashedPassword = passwordEncoder.encode(password);
@@ -168,6 +174,8 @@ class AuthServiceTest {
         assertThat(response.tokenType()).isEqualTo("Bearer");
         assertThat(response.expiresInSeconds()).isEqualTo(900L);
         assertThat(response.roles()).containsExactly(Role.CUSTOMER);
+        assertThat(output).contains("auth.login.completed userId=" + userId + " outcome=authenticated")
+                .doesNotContain("john@example.com", password, "access_token", "refresh_token");
     }
 
     @Test

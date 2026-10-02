@@ -5,14 +5,19 @@ import com.jagapathi.pharmacy.audit.domain.AuditAction;
 import com.jagapathi.pharmacy.audit.domain.AuditResourceType;
 import com.jagapathi.pharmacy.audit.domain.AuditStatus;
 import com.jagapathi.pharmacy.audit.infrastructure.persistence.ProcessedEventRepository;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -102,7 +107,16 @@ class AuditEventProcessorTest {
             }
             """.formatted(eventId, aggregateId, actorId);
 
-        processor.process(message, AuditResourceType.ORDER);
+            var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(AuditEventProcessor.class);
+            var appender = new ListAppender<ILoggingEvent>();
+            appender.start();
+            logger.addAppender(appender);
+            try {
+                processor.process(message, AuditResourceType.ORDER);
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
 
         ArgumentCaptor<String> details = ArgumentCaptor.forClass(String.class);
         verify(auditLogService).createAuditLog(
@@ -110,6 +124,16 @@ class AuditEventProcessorTest {
             eq(actorId), isNull(), eq(AuditStatus.SUCCESS), details.capture(), isNull()
         );
         assertThat(details.getValue()).isEqualTo("{\"status\":\"CONFIRMED\"}");
+        assertThat(appender.list).anySatisfy(logEvent -> {
+            Map<String, Object> fields = logEvent.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "audit.event.recorded")
+                .containsEntry("eventId", eventId)
+                .containsEntry("aggregateId", aggregateId)
+                .containsEntry("auditStatus", AuditStatus.SUCCESS)
+                .doesNotContainKeys("payload", "details", "actorId");
+        });
     }
 
     @Test
@@ -126,6 +150,39 @@ class AuditEventProcessorTest {
             any(), anyString(), any(), any(), any(), any(), any(), any(), any()
         );
         verify(processedEventRepository, never()).save(any());
+    }
+
+    @Test
+    void logsPaymentFailureOutcomeWithoutEventPayload() {
+        UUID orderId = UUID.randomUUID();
+        UUID paymentId = UUID.randomUUID();
+        String eventId = UUID.randomUUID().toString();
+        String message = """
+            {"eventId":"%s","eventType":"PaymentFailed","paymentId":"%s","orderId":"%s",
+             "failureCode":"GATEWAY_DECLINED"}
+            """.formatted(eventId, paymentId, orderId);
+
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(AuditEventProcessor.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            processor.process(message, AuditResourceType.PAYMENT);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "audit.event.recorded")
+                .containsEntry("eventId", eventId)
+                .containsEntry("orderId", orderId.toString())
+                .containsEntry("auditStatus", AuditStatus.FAILURE)
+                .doesNotContainKeys("payload", "details", "failureCode");
+        });
     }
 
     @Test

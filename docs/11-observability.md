@@ -90,6 +90,28 @@ They serve different purposes and should be retained together. Metric labels
 remain low-cardinality and never contain order, customer, prescription, or
 payment identifiers.
 
+## Investigating a Kubernetes transaction
+
+Open the **Pharmacy Platform Observability** dashboard and set its time range
+to cover the request. Enter the `X-Correlation-ID` returned by the gateway in
+**Correlation ID**, or the order UUID in **Order ID**. The **Transaction
+timeline** panel searches logs in the `pharmacy` namespace, excluding
+`/actuator/` traffic. Clearing both fields displays all non-actuator logs.
+Expand a log line containing a 32-character trace ID and click its
+**Trace (console)** or **Trace (JSON)** derived-field link to open Tempo.
+Loki's labels remain low-cardinality (`namespace`, `app`, `pod`); resource and
+request IDs are searched in log content, not indexed as stream labels.
+
+The gateway records `http.request.completed` with method, path, status,
+duration and outcome. The business services log meaningful order lifecycle
+transitions and event deliveries rather than every status poll. For an order
+flow, search its order ID first, then use the trace link to follow the
+gateway, order, inventory, payment, external mock, notification and audit
+spans. Async events can have different request correlation IDs for later
+reads, but the event's captured trace context ties the saga together.
+Neither logs nor dashboards should contain passwords, tokens, addresses,
+prescription instructions or payment details.
+
 The local Kafka exporter supplies consumer lag and recent DLT-topic activity.
 The DLT alert detects offset increases over a recent window rather than
 re-alerting forever on historical records. Container restart alerts are
@@ -101,7 +123,13 @@ does not expose Kubernetes pod restart metrics.
 The Kubernetes stack is separate from Compose and is installed only when
 needed. It runs in `pharmacy-observability` with short retention, one replica,
 and ClusterIP-only services. Alloy tails pod logs from namespace `pharmacy`;
-the Collector forwards OTLP traces to Tempo. The local values enable Kafka
+the Collector forwards OTLP traces to Tempo. The local Kubernetes application
+values request structured JSON console logs
+(`LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash`) with explicit `service` and
+`environment` fields. The gateway also activates its `k8s` profile to select
+its JSON Logback appender; Compose's `local` profile retains plain text.
+Grafana's Loki datasource has trace links for both formats.
+The local values enable Kafka
 Exporter against the host broker at `host.docker.internal:29092`.
 The profile is compact (about 0.8 GiB requested, 2.6 GiB limits): it disables
 Alertmanager, node-exporter, control-plane scrapers and Loki canary pods, and

@@ -56,13 +56,13 @@ public class AuthService {
 
     @Transactional
     public UserResponse registerUser(RegisterRequest request) {
-        logger.debug("Registering user");
-
         if (userRepository.findByEmail(request.email()).isPresent()) {
+            logger.debug("auth.registration.completed outcome=rejected reason=duplicate_email");
             throw new UserAlreadyExistsException("Email already exists");
         }
 
         if (userRepository.findByUsername(request.username()).isPresent()) {
+            logger.debug("auth.registration.completed outcome=rejected reason=duplicate_username");
             throw new UserAlreadyExistsException("Username already exists");
         }
 
@@ -84,23 +84,26 @@ public class AuthService {
         );
 
         User savedUser = userRepository.save(user);
-        logger.info("User registered successfully: {}", savedUser.getId());
+        logger.info("auth.registration.completed userId={} outcome=created", savedUser.getId());
 
         return toUserResponse(savedUser);
     }
 
     @Transactional
     public TokenResponse authenticateUser(LoginRequest request) {
-        logger.debug("Authenticating user");
-
         User user = userRepository.findByUsername(request.username())
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid username or password"));
+                .orElseThrow(() -> {
+                    logger.debug("auth.login.completed outcome=rejected reason=invalid_credentials");
+                    return new InvalidCredentialsException("Invalid username or password");
+                });
 
         if (!user.isActive()) {
+            logger.debug("auth.login.completed outcome=rejected reason=inactive");
             throw new InvalidCredentialsException("User account is not active");
         }
 
         if (!passwordEncoder.matches(request.password(), user.getPassword())) {
+            logger.debug("auth.login.completed outcome=rejected reason=invalid_credentials");
             throw new InvalidCredentialsException("Invalid username or password");
         }
 
@@ -110,7 +113,7 @@ public class AuthService {
         String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getUsername(), user.getRoles());
         String refreshToken = generateAndStoreRefreshToken(user.getId());
 
-        logger.info("User authenticated successfully: {}", user.getId());
+        logger.info("auth.login.completed userId={} outcome=authenticated", user.getId());
 
         return new TokenResponse(
                 accessToken,
@@ -162,7 +165,7 @@ public class AuthService {
         } catch (InvalidTokenException e) {
             throw e;
         } catch (Exception e) {
-            logger.debug("Token refresh failed: {}", e.getMessage());
+            logger.debug("auth.token.refresh outcome=rejected");
             throw new InvalidTokenException("Invalid or expired refresh token", e);
         }
     }

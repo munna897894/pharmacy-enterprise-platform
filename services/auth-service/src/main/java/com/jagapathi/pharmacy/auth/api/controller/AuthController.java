@@ -39,14 +39,12 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
-        logger.info("Registration request received");
         UserResponse userResponse = authService.registerUser(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(userResponse);
     }
 
     @PostMapping("/login")
     public ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request) {
-        logger.info("Login request received");
         TokenResponse tokenResponse = authService.authenticateUser(request);
         return ResponseEntity.ok(tokenResponse);
     }

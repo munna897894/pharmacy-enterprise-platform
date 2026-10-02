@@ -6,8 +6,11 @@ import com.jagapathi.pharmacy.notification.domain.OrderCustomer;
 import com.jagapathi.pharmacy.notification.domain.ProcessedEvent;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.OrderCustomerRepository;
 import com.jagapathi.pharmacy.notification.infrastructure.persistence.ProcessedEventRepository;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -18,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -119,11 +124,30 @@ class NotificationEventHandlerTest {
     void paymentFailedSendsPaymentFailedNotification() {
         givenProjection();
 
-        handler.onPaymentFailed(EVENT_ID, ORDER_ID, "GATEWAY_DECLINED");
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(NotificationEventHandler.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            handler.onPaymentFailed(EVENT_ID, ORDER_ID, "GATEWAY_DECLINED");
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
 
         verify(notificationService).sendNotification(eq(CUSTOMER_ID), eq(ORDER_ID),
             eq(NotificationType.PAYMENT_FAILED), anyList(), anyMap());
         verifyInboxRecorded();
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "notification.payment_failed.handled")
+                .containsEntry("eventId", EVENT_ID)
+                .containsEntry("orderId", ORDER_ID)
+                .containsEntry("outcome", "failure_notified")
+                .doesNotContainKeys("failureCode", "customerId", "email", "amount");
+        });
     }
 
     @Test

@@ -27,8 +27,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ProblemDetail> handleInvalidCredentials(InvalidCredentialsException e) {
-        logger.debug("Invalid credentials: {}", e.getMessage());
-
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.UNAUTHORIZED,
                 "Invalid credentials"
@@ -42,8 +40,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(UserAlreadyExistsException.class)
     public ResponseEntity<ProblemDetail> handleUserAlreadyExists(UserAlreadyExistsException e) {
-        logger.warn("User already exists: {}", e.getMessage());
-
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.CONFLICT,
                 e.getMessage()
@@ -57,8 +53,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ProblemDetail> handleUserNotFound(UserNotFoundException e) {
-        logger.debug("User not found: {}", e.getMessage());
-
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND,
                 e.getMessage()
@@ -72,8 +66,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidTokenException.class)
     public ResponseEntity<ProblemDetail> handleInvalidToken(InvalidTokenException e) {
-        logger.debug("Invalid token: {}", e.getMessage());
-
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.UNAUTHORIZED,
                 "Invalid or expired token"
@@ -87,8 +79,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ProblemDetail> handleValidationException(MethodArgumentNotValidException e) {
-        logger.debug("Validation error: {}", e.getMessage());
-
         Map<String, String> errors = new HashMap<>();
         e.getBindingResult().getFieldErrors().forEach(error ->
                 errors.put(error.getField(), error.getDefaultMessage())
@@ -108,7 +98,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AuthException.class)
     public ResponseEntity<ProblemDetail> handleAuthException(AuthException e) {
-        logger.error("Auth exception: {}", e.getMessage());
+        logger.error("auth.error outcome=failed");
 
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.INTERNAL_SERVER_ERROR,
@@ -123,8 +113,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ProblemDetail> handleIllegalArgument(IllegalArgumentException e) {
-        logger.debug("Illegal argument: {}", e.getMessage());
-
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_REQUEST,
                 e.getMessage()

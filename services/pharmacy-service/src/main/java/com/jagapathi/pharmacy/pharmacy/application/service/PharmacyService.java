@@ -14,6 +14,8 @@ import com.jagapathi.pharmacy.pharmacy.domain.model.PharmacyAddress;
 import com.jagapathi.pharmacy.pharmacy.domain.repository.BusinessHourRepository;
 import com.jagapathi.pharmacy.pharmacy.domain.repository.PharmacyAddressRepository;
 import com.jagapathi.pharmacy.pharmacy.domain.repository.PharmacyRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,8 @@ import java.util.List;
 @Service
 @Transactional
 public class PharmacyService {
+
+    private static final Logger log = LoggerFactory.getLogger(PharmacyService.class);
 
     private final PharmacyRepository pharmacyRepository;
     private final PharmacyAddressRepository addressRepository;
@@ -81,6 +85,7 @@ public class PharmacyService {
         );
         
         Pharmacy saved = pharmacyRepository.save(pharmacy);
+        log.info("pharmacy.created pharmacyId={} outcome=created", saved.getId());
         return PharmacyResponse.from(saved, null, List.of());
     }
 
@@ -94,6 +99,7 @@ public class PharmacyService {
         
         pharmacy.update(request.name(), request.phone());
         Pharmacy updated = pharmacyRepository.save(pharmacy);
+        log.info("pharmacy.updated pharmacyId={} outcome=updated", updated.getId());
         
         PharmacyAddressResponse address = addressRepository.findByPharmacyId(pharmacyId)
                 .map(PharmacyAddressResponse::from)
@@ -117,6 +123,7 @@ public class PharmacyService {
         
         pharmacy.setStatus(newStatus);
         Pharmacy updated = pharmacyRepository.save(pharmacy);
+        log.info("pharmacy.status.updated pharmacyId={} status={}", updated.getId(), updated.getStatus());
         
         PharmacyAddressResponse address = addressRepository.findByPharmacyId(pharmacyId)
                 .map(PharmacyAddressResponse::from)

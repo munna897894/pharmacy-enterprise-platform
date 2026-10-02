@@ -1,12 +1,15 @@
 package com.jagapathi.pharmacy.payment.application;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.jagapathi.pharmacy.payment.api.PaymentResponse;
 import com.jagapathi.pharmacy.payment.domain.*;
 import com.jagapathi.pharmacy.payment.infrastructure.OutboxRepository;
 import com.jagapathi.pharmacy.payment.infrastructure.OrderLookupClient;
 import com.jagapathi.pharmacy.payment.infrastructure.PaymentGatewayClient;
 import com.jagapathi.pharmacy.payment.infrastructure.PaymentRepository;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -14,11 +17,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 
 import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -46,7 +52,7 @@ class PaymentServiceTest {
     
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
+        objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         Mockito.lenient().when(orderLookupClient.getOrderSummary(any())).thenReturn(null);
         paymentService = new PaymentService(paymentRepository, outboxRepository, gatewayClient, orderLookupClient, kafkaTemplate, objectMapper);
     }
@@ -77,12 +83,33 @@ class PaymentServiceTest {
         
         when(paymentRepository.save(any(Payment.class))).thenReturn(savedPayment);
         
-        PaymentResponse response = paymentService.processPayment(orderId, customerId, amount, "USD", PaymentMethod.CREDIT_CARD, idempotencyKey);
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(PaymentService.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        PaymentResponse response;
+        try {
+            response = paymentService.processPayment(orderId, customerId, amount, "USD",
+                PaymentMethod.CREDIT_CARD, idempotencyKey);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
         
         assertThat(response).isNotNull();
         assertThat(response.orderId()).isEqualTo(orderId);
         assertThat(response.status()).isEqualTo("SUCCESS");
         assertThat(response.referenceNumber()).isEqualTo("TXN-123");
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "payment.lifecycle.completed")
+                .containsEntry("orderId", orderId)
+                .containsEntry("status", PaymentStatus.SUCCESS)
+                .containsKey("eventId")
+                .doesNotContainKeys("amount", "customerId", "paymentMethod", "providerReference");
+        });
         
         verify(paymentRepository, times(3)).save(any(Payment.class));
     }
@@ -143,9 +170,30 @@ class PaymentServiceTest {
         
         when(paymentRepository.save(any(Payment.class))).thenReturn(failedPayment);
         
-        PaymentResponse response = paymentService.processPayment(orderId, customerId, amount, "USD", PaymentMethod.CREDIT_CARD, idempotencyKey);
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(PaymentService.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        PaymentResponse response;
+        try {
+            response = paymentService.processPayment(orderId, customerId, amount, "USD",
+                PaymentMethod.CREDIT_CARD, idempotencyKey);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
         
         assertThat(response.status()).isEqualTo("FAILED");
+        assertThat(appender.list).anySatisfy(event -> {
+            Map<String, Object> fields = event.getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertThat(fields)
+                .containsEntry("eventName", "payment.lifecycle.failed")
+                .containsEntry("orderId", orderId)
+                .containsEntry("outcome", "failed")
+                .containsEntry("failureCode", "GATEWAY_DECLINED")
+                .doesNotContainKeys("amount", "customerId", "paymentMethod", "providerReference");
+        });
     }
     
     @Test

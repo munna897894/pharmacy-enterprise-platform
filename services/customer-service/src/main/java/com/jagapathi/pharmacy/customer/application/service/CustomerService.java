@@ -8,6 +8,8 @@ import com.jagapathi.pharmacy.customer.domain.model.Customer;
 import com.jagapathi.pharmacy.customer.domain.model.CustomerAddress;
 import com.jagapathi.pharmacy.customer.domain.repository.CustomerAddressRepository;
 import com.jagapathi.pharmacy.customer.domain.repository.CustomerRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +18,8 @@ import java.util.List;
 
 @Service
 public class CustomerService {
+
+    private static final Logger log = LoggerFactory.getLogger(CustomerService.class);
 
     private final CustomerRepository customerRepository;
     private final CustomerAddressRepository customerAddressRepository;
@@ -31,6 +35,7 @@ public class CustomerService {
                                            String email, String phone, LocalDate dateOfBirth) {
         Customer customer = new Customer(authUserId, firstName, lastName, email, phone, dateOfBirth);
         Customer saved = customerRepository.save(customer);
+        log.info("customer.profile.created customerId={} outcome=created", saved.getId());
         return CustomerResponse.from(saved);
     }
 
@@ -53,6 +58,7 @@ public class CustomerService {
         checkOwnerOrAdmin(customer, currentUserId, roles);
         customer.update(firstName, lastName, email, phone, dateOfBirth);
         Customer saved = customerRepository.save(customer);
+        log.info("customer.profile.updated customerId={} outcome=updated", saved.getId());
         return CustomerResponse.from(saved);
     }
 

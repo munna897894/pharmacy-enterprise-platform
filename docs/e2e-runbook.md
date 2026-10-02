@@ -46,6 +46,11 @@ python3 scripts/generate_postman_collection.py
 
 `scripts/newman.sh` includes a request delay because bounded polling waits for
 the asynchronous outbox/Kafka choreography to complete.
+The Happy Path's `Poll Until CONFIRMED` step also waits one second before each
+retry in its pre-request script. Run the Happy Path in **Collection Runner**
+(not by repeatedly clicking Send); no Runner delay setting is required for
+that step. Its 30 bounded retries allow at least 30 seconds for the saga,
+and a non-200 response or cancelled order fails immediately.
 
 The latest recorded full local Kubernetes run completed **193/193
 assertions**; request count varies with bounded asynchronous polling. This is
